@@ -1,31 +1,34 @@
 # AGENTS.md
 
-Version: `v0.9-daily-signal-redefinition`
+Version: `v1.0-tw-adaptation`
 Status: agent and contributor operating contract
-Last updated: `2026-07-02`
-Project: `Crypto Quant Signal MVP v1.0`
-Evidence basis: `docs/research/SIGNAL_DESIGN_RESEARCH.md` (2026-07-02)
+Last updated: `2026-07-03`
+Project: `TW Stock Signal MVP v1.0`
+Evidence basis: `docs/research/TW_SIGNAL_DESIGN_RESEARCH.md` (2026-07-03)
 
 ---
 
 ## 0. Purpose
 
-This file tells AI agents, coding assistants, and contributors how to work in this repository.
+This file tells AI agents, coding assistants, and contributors how to work in
+this repository.
 
-The product is a DAILY signal notification system with a paper-trading scoreboard:
+The product is a DAILY signal notification system for Taiwan-listed equities
+with a paper-trading scoreboard:
 
 ```text
-daily (UTC close) public market data decisions
-spot long-only exposure ladder
-signal notifications to the user, who executes manually
-1000 USDT virtual account follows every signal as the honest scoreboard
-no real exchange orders, ever (permanent product property)
+daily (Taipei close) keyless public market data decisions
+long-only exposure ladder on 0050
+signal notifications to the user, who executes manually next trading day
+100,000 TWD virtual account follows every signal as the honest scoreboard
+   (dividends, fees, and taxes included)
+no real orders, no broker API, no credentials — ever (permanent)
 ```
 
-The goal is to tell the user WHEN to enter and WHEN to exit, verifiably and
-auditable — and to prove or disprove the strategy's edge before real money
-follows it. Design decisions are grounded in adversarially verified research
-(`docs/research/SIGNAL_DESIGN_RESEARCH.md`).
+The registered value proposition is DRAWDOWN REDUCTION, not return
+enhancement: the system is not expected to beat 0050 buy-and-hold on CAGR,
+and the validation gate adjudicates exactly that claim
+(`docs/contracts/VALIDATION_GATE_CONTRACT.md`).
 
 Plain language:
 
@@ -33,6 +36,7 @@ Plain language:
 不要把系統做成死路。
 也不要把 MVP 做成研究平台或技術百科。
 先完成可運行核心，再用合約擴充。
+主張是「降回撤」，永遠不要偷偷升級成「賺更多」。
 ```
 
 ---
@@ -40,89 +44,63 @@ Plain language:
 ## 1. Golden Rule
 
 ```text
-Keep Core MVP narrow.
+Keep TW Core MVP narrow.
 Keep architecture expandable.
 Keep documents readable.
 Never weaken safety rules.
 ```
 
-Agents must not add future features just because the architecture has a place for them.
-
-If a feature is not in the current goal, leave an interface or note, but do not implement it.
+Agents must not add future features just because the architecture has a place
+for them. If a feature is not in the current goal, leave an interface or
+note, but do not implement it.
 
 ---
 
 ## 2. Non-Negotiable Safety Rules
 
-### 2.1 Secrets
+### 2.1 Secrets And Credentials
 
-Do not create, edit, print, log, commit, or expose:
+Do not create, edit, print, log, commit, or expose: API keys, tokens,
+private keys, passwords, webhook tokens, `.env` files.
 
-- API keys
-- secret keys
-- private keys
-- seed phrases
-- passwords
-- webhook tokens
-- `.env` files
-
-MVP v1.0 should not need secrets.
-
-If secrets are introduced in a later non-MVP contract, they must be loaded only from environment variables or approved secret management.
+This product should NEVER need a credential: TWSE endpoints are keyless and
+FinMind's anonymous tier suffices. A FinMind token is allowed only as an
+OPTIONAL quota raise, must never be required by code paths or tests, and is
+a data token — broker credentials are forbidden permanently.
 
 ### 2.2 Trading Scope
 
 Allowed in MVP:
 
-- spot crypto
-- long exposure
-- flat exposure
-- public market data
-- backtesting
-- paper trading through virtual account ledger
+- Taiwan-listed spot equities/ETFs (decision universe: 0050)
+- long exposure, flat exposure
+- keyless public market data
+- backtesting with trial registration
+- paper trading through the virtual account ledger (incl. dividends)
 
 Forbidden in MVP (and permanently, by product definition):
 
-- margin
-- leverage
-- borrowing
-- lending
-- perpetual futures
-- derivatives
-- short exposure
-- synthetic short exposure
+- margin, leverage, borrowing, lending, derivatives
+- short exposure, synthetic short exposure
 - real order submission (permanent — the user is the only executor)
 - auto-execution of any kind (permanent)
-- private exchange API (permanent)
-- API keys (permanent)
+- broker APIs: Shioaji, Fugle, or any other (permanent)
+- credentials / API keys (permanent)
 - real account balance access (permanent)
+- day trading (odd lots cannot day-trade anyway; the system decides daily)
 
 ### 2.3 Signal And Position Rules
 
-- `Signal` may only be `LONG` or `FLAT`.
-- Do not add `SHORT`.
-- `Position.quantity` must never be negative.
-- `TargetPosition.quantity` must never be negative.
-- `SELL` can only reduce an existing long spot position.
-- Selling more than the current long position is invalid.
+- `Signal` may only be `LONG` or `FLAT`. Do not add `SHORT`.
+- `Position.quantity` and `TargetPosition.quantity` must never be negative.
+- `SELL` can only reduce an existing long position.
+- Exposure fraction only in {0, 0.25, 0.5, 0.75, 1}.
 
 ### 2.4 Paper Trading Rule
 
-Paper trading is allowed only as:
-
-```text
-virtual order
-virtual fill
-virtual account ledger
-```
-
-Paper trading must not:
-
-- sign exchange requests
-- send real orders
-- read real balances
-- use private API keys
-- mutate a real exchange account
+Paper trading is only: virtual order → virtual fill → virtual ledger.
+It must never sign broker requests, send real orders, read real balances,
+or mutate any real account.
 
 ---
 
@@ -131,67 +109,59 @@ Paper trading must not:
 ### 3.1 Build
 
 ```text
-public market data
-  -> closed DAILY candle gate (UTC close)
-  -> feature pipeline (SMA ensemble)
-  -> one active strategy (Daily Trend Ensemble, exposure ladder)
-  -> portfolio targets (ladder x risk budget)
-  -> risk gate
+keyless public data (TWSE RWD/OpenAPI + FinMind anonymous)
+  -> trading calendar gate (holiday / make-up-day / typhoon / suspension)
+  -> closed DAILY candle gate (Taipei close; data final ~17:30; job >= 18:00)
+  -> corporate-action factors -> ADJUSTED series for signals
+  -> SMA ensemble features (adjusted closes only)
+  -> Daily Trend Ensemble ladder decision
+  -> portfolio share targets (odd-lot granularity) x risk budget (0050: 100%)
+  -> risk gate (TW triggers)
   -> signal notification (persisted, idempotent, advisory)
-  -> paper broker -> virtual account (scoreboard)
-  -> read-only dashboard/API
+  -> paper broker (next trading day open, TW costs on RAW prices)
+  -> virtual account ledger (dividends, splits, fees, taxes)
+  -> read-only dashboard/API (benchmark: 0050 total-return buy-and-hold)
 ```
 
-The human executes real trades manually, outside the system. 15m candles remain
-available as data granularity (cost measurement, later research), not as the
-decision timeframe.
+The human executes real trades manually, outside the system.
 
 ### 3.2 Do Not Build In Core MVP
 
 ```text
-real trading bot (excluded permanently, not just in MVP)
-private exchange client (excluded permanently)
-live account manager (excluded permanently)
+real trading bot / broker client / live account manager (excluded permanently)
 intraday decision loop
+2330 single-stock timing (evidence-excluded)
 research lab as a blocker
 multi-strategy production allocator
-unbounded optimizer
-HMM or neural network strategy
+unbounded optimizer, HMM, neural network strategy
 ```
 
 ### 3.3 Initial Virtual Account (the scoreboard)
 
 ```text
-initial_cash: 1000 USDT
+initial_cash: 100,000 TWD
 mode: paper
+sizing: odd-lot shares (quantity step = 1)
 role: follows every signal in parallel — "what if you followed everything"
-real_orders: disabled (permanent)
-private_api: disabled (permanent)
+real_orders: disabled (permanent);  broker_api: nonexistent (permanent)
 ```
 
 ---
 
 ## 4. Plain-Language Design Rule
 
-The system must follow this division of responsibility:
-
 ```text
-strategy = decides what looks attractive
-portfolio = decides how much to target
+calendar = knows which days trade
+data = fetches, reconciles, adjusts
+strategy = decides what the ladder should be
+portfolio = decides how many shares
 risk = decides whether the action is allowed
-paper broker = simulates execution
-accounting = records what happened
+paper broker = simulates execution with TW costs
+accounting = records what happened (incl. dividends)
 ```
 
-Do not let strategy become the whole system.
-
-Strategy must not:
-
-- submit orders
-- decide final execution quantity
-- bypass risk
-- touch account ledger directly
-- touch exchange clients directly
+Strategy must not: submit orders, decide final quantity, bypass risk, touch
+the ledger, touch data clients, or read account state.
 
 ---
 
@@ -199,308 +169,205 @@ Strategy must not:
 
 ### 5.1 `src/domain/`
 
-Domain is the shared type layer.
-
-It must not import:
-
-- business packages
-- runtime
-- backtest
-- scripts
-- exchange adapters
-- database clients
+Domain is the shared type layer. It must not import business packages,
+runtime, backtest, scripts, data adapters, or database clients.
 
 ### 5.2 Business Packages
 
-Business packages include:
-
 ```text
-src/data/
-src/features/
-src/strategies/
-src/portfolio/
-src/risk/
-src/execution/
-src/accounting/
-src/notify/       (Goal L: persisted, idempotent notification events)
-src/monitoring/
+src/data/ (calendar, twse, finmind, adjustments, quality, files)
+src/features/  src/strategies/  src/portfolio/  src/risk/
+src/execution/  src/accounting/  src/notify/  src/monitoring/
 ```
 
-A business package may import:
-
-- `src.domain`
-- itself
-- approved third-party libraries
-
-Business packages should not directly import unrelated business packages unless the architecture document explicitly allows it.
-
-Composition belongs in:
-
-```text
-src/backtest/
-src/runtime/
-```
+A business package may import `src.domain`, itself, and approved third-party
+libraries. Composition belongs in `src/backtest/` and `src/runtime/` only.
+Boundaries are enforced by import-linter — keep the contracts green.
 
 ### 5.3 `scripts/`
 
-Scripts must remain thin CLI wrappers.
-
-Scripts may:
-
-- parse command arguments
-- load config
-- call application entry points
-- print summary output
-
-Scripts must not contain:
-
-- strategy logic
-- sizing logic
-- risk logic
-- execution logic
-- accounting logic
-- exchange business logic
+Thin CLI wrappers only: parse args, load config, call entry points, print
+summaries. No strategy/sizing/risk/execution/accounting/adapter business
+logic in scripts.
 
 ---
 
 ## 6. Data And Timing Rules
 
-### 6.1 Candle Rules
+### 6.1 Candle And Series Rules
 
-- Decisions use closed DAILY candles (UTC close) only.
-- Use only closed candles for feature and signal generation, at any timeframe.
-- Still-open candles must not be used for strategy decisions.
-- Store candle close status when available.
-- If close status is unclear, infer conservatively.
-- Runtime candle closure should come from Binance Spot public kline closure fields when available.
+- Decisions use closed DAILY candles (Taipei close 13:30) only.
+- TWSE daily data is final ~17:30 Taipei; the daily job runs ≥ 18:00 Taipei.
+  TWSE OpenAPI `STOCK_DAY_ALL` is T+1 and must not feed same-day signals.
+- DUAL SERIES rule: SMA features and return computations read the
+  dividend/split-ADJUSTED series; accounting, fills, and notifications use
+  RAW official prices. Feeding raw closes into SMA is a contract violation.
+- Adjustment factors come only from official corporate-action rows
+  (TWT49U/TWTCAU/TWTAUU), factor = reference price ÷ prior close, persisted
+  append-only with their source rows.
 - No decision before the warmup floor (200 daily closes per asset).
+- If close status is unclear, treat the candle as unusable.
 
-### 6.2 Symbol And Time Rules
+### 6.2 Calendar Rules
 
-- Internal symbols use Binance native format, for example `BTCUSDT`.
-- Display symbols may use slash format, for example `BTC/USDT`.
-- Store `base_asset` and `quote_asset` explicitly.
-- All storage, config, report, API, and runtime timestamps must be UTC timezone-aware.
-- Naive datetimes are forbidden.
+- Weekends, scheduled holidays, make-up-workday closures (補班日: market
+  CLOSED), typhoon closures, and corporate-action suspensions are NOT data
+  gaps and NOT staleness.
+- GAP = a missing TRADING day. STALE is measured in TRADING days.
+- Unscheduled-closure protocol: no data by ~18:30 Taipei on an expected
+  trading day → reconcile with FinMind `TaiwanStockTradingDate`; agreement →
+  `UNSCHEDULED_CLOSURE` health event; disagreement →
+  `DATA_SOURCE_DISAGREEMENT` and block strategy input for the day.
+- The holiday API returns the CURRENT YEAR only — persist per-year schedule
+  files and refresh on year boundaries.
 
-### 6.3 Execution Timing
+### 6.3 Symbol, Money, And Time Rules
 
-- A feature computed at candle close may use data available at that close.
-- A signal produced from candle `t` can only execute after candle `t` has closed.
-- Backtest must not fill on the same candle that created the signal.
-- Runtime paper fills must use a later public market price.
+- Internal symbols are TWSE codes: `0050`, `2330`, `006208`, `00679B`
+  (pattern `^[0-9][0-9A-Z]{3,5}$`). base_asset = code, quote_asset = `TWD`.
+- Money is `Decimal` TWD. Volume unit is SHARES (TPEx sources use 張 =
+  1,000 shares — convert at the adapter boundary, never downstream).
+- All storage/config/report/API timestamps are UTC timezone-aware; candles
+  additionally carry `trading_date` (Taipei calendar date). Naive datetimes
+  are forbidden.
+- ROC dates exist in THREE formats at the adapter boundary (`1150702`,
+  `115/06/01` with leading space for 2-digit years, `114年06月16日`);
+  they must never leak past `src/data/`.
 
-### 6.4 Lookahead Prevention
+### 6.4 Execution Timing
 
-Stop and report if code:
+- A signal produced from close `t` executes no earlier than the NEXT TRADING
+  day (backtest and runtime use the same next-trading-day-open rule).
+- No same-bar execution. No still-open-session data in features.
 
-- uses future candles
-- uses target returns as features
-- uses future universe membership
-- uses a candle before it is closed
-- backfills missing data in a way that leaks future information
-- treats any latest incomplete OHLCV candle as closed
+### 6.5 Lookahead Prevention
+
+Stop and report if code: uses future candles, uses future universe
+membership, uses a candle before close, forward-fills through suspensions/
+holidays for returns, applies an adjustment factor before its ex-date, or
+treats the latest incomplete session as closed.
 
 ---
 
 ## 7. Core MVP Strategy Rules
 
-The active strategy is a readable daily trend strategy:
-
 ```text
-Daily Trend Ensemble
-日線趨勢均線組合（20/65/150/200 日 SMA，曝險五檔階梯）
+Daily Trend Ensemble（日線趨勢均線組合，20/65/150/200 日 SMA，曝險五檔階梯）
 Contract: docs/contracts/STRATEGY_DAILY_TREND_ENSEMBLE.md
+Input: ADJUSTED closes.  Universe: 0050 only (100% budget).
 ```
-
-It is a long-only time-series trend rule: per asset, exposure equals the
-fraction of the four SMAs the close sits above (0/25/50/75/100%).
 
 Default behavior:
 
 ```text
-Check once per day after the UTC daily close.
-Ladder up when more trend lines are reclaimed.
-Ladder down toward cash when they break.
+Check once per trading day after the Taipei close.
+Ladder up when more trend lines are reclaimed; ladder down toward cash.
 No shorting. No dip-buying. No cross-sectional rotation.
-Long silences are correct behavior.
+Long silences are correct behavior (~2-10 ladder changes/year expected).
 ```
 
-The four lookbacks {20, 65, 150, 200} are contract-fixed and uniform across
-assets. Changing or tuning them is a new strategy variant: it requires
-pre-registration in the trial registry (counts toward N) and a contract change.
-
-The superseded `Large Liquid Trend 15` (15m) code and contract remain in the
-repository as inactive reference — do not delete, do not wire into runtime.
-
-Do not hard-code parameters in business logic. Use config or strategy contract values.
-
-Do not add additional active strategy candidates unless a new goal and contract authorize them.
+The four lookbacks {20, 65, 150, 200} are contract-fixed. Changing or tuning
+them, adding hysteresis, or adding assets is a new strategy variant: it
+requires pre-registration in the trial registry (counts toward N) and a
+contract change. Do not hard-code parameters in business logic.
 
 ---
 
 ## 8. Cost And Execution Rules
 
-Paper execution must include costs.
-
-Minimum cost components:
+Paper execution must include TW costs:
 
 ```text
-fee
-slippage
-rounding
+commission = notional x 0.1425% x broker_discount, floor min_fee (NT$20;
+             odd-lot NT$1 at some brokers) — both sides
+sell tax   = notional x 0.1% (ETF) / 0.3% (stock) — SELL side only
+slippage   = configured bps
+rounding   = bracketed tick table (ETF <50: 0.01, >=50: 0.05; stocks 6 brackets)
+             and share-lot granularity (odd lot = 1 share)
 ```
 
-If spread, impact, or latency are modeled, record them clearly and do not double count them.
+(Interim until Goal TW-D: flat `fee_bps` 13.5 approximates the round trip —
+see config comments. Replacing it with the full model is TW-D scope.)
 
-Execution rounding rules:
+Execution rounding rules: quantity respects lot granularity;
+cash_after_order never negative; buys reserve estimated costs; reject after
+rounding if minimum notional (NT$10,000) is not satisfied. Fills on a day
+whose open sits at the ±10% limit carry a `LIMIT_DAY` flag.
 
-```text
-quantity must respect exchange-like step size
-cash_after_order must never be negative
-buy orders must reserve estimated fee and slippage cash
-dust positions may exist but must never become negative
-reject after rounding if minimum notional is not satisfied
-```
+Dividends: ex-date books `DIVIDEND_ACCRUED` (counts in equity), pay-date
+books `DIVIDEND_PAID` (cash in). Splits book `SPLIT_ADJUST` (quantity
+×ratio, average cost ÷ratio, equity invariant).
 
 ---
 
 ## 9. Runtime Rules
 
-Paper runtime must be:
+Paper runtime must be restartable, idempotent, auditable, keyless-public-data
+only, safe on stale data, duplicate events, partial failure, unscheduled
+closures, and multi-day suspensions (0050 was halted 5 sessions in 2025-06).
 
-- restartable
-- idempotent
-- auditable
-- public-data only
-- safe on stale data
-- safe on duplicate events
-- safe on partial failure
+Runtime must persist: config snapshot, universe snapshot, calendar/health
+events, candle events, adjustment factors, feature snapshots, signals,
+targets, risk decisions, notifications (persisted BEFORE delivery), virtual
+orders/fills, dividend events, account snapshots.
 
-Runtime must persist:
-
-- config snapshot
-- universe snapshot
-- candle events
-- feature snapshots
-- signals
-- targets
-- risk decisions
-- notification events (persisted BEFORE delivery, with reason codes)
-- virtual orders
-- virtual fills
-- account snapshots
-- health events
-
-Runtime must not:
-
-- depend on private API
-- need API keys
-- submit real orders
-- continue increasing exposure on stale data
-- duplicate orders after restart
-- duplicate notifications after restart (idempotency keys required)
+Runtime must not: need credentials, submit real orders, increase exposure on
+stale data, duplicate orders or notifications after restart, or treat a
+holiday as an incident.
 
 ---
 
 ## 10. Storage Rules
 
-Runtime needs a real event store so the system can restart and explain what happened.
+PostgreSQL-compatible runtime storage (TimescaleDB recommended for local
+development). SQLite only for unit tests and fixtures.
 
-MVP default:
-
-```text
-PostgreSQL-compatible runtime storage.
-TimescaleDB is recommended for local development.
-```
-
-SQLite is allowed only for unit tests and temporary fixtures unless a new storage contract says otherwise.
-
-Local development credentials in `docker-compose.yml` may be explicit dummy credentials, for example:
+Local development credentials in `docker-compose.yml` are explicit dummies:
 
 ```text
-POSTGRES_USER=crypto
-POSTGRES_PASSWORD=crypto_dev_only
-POSTGRES_DB=crypto_quant
+POSTGRES_USER=tw  POSTGRES_PASSWORD=tw_dev_only  POSTGRES_DB=tw_quant
+host port 54321 (54320 belongs to the crypto sibling project)
 ```
-
-These are local-development credentials, not production secrets.
 
 ---
 
 ## 11. Dashboard/API Rules
 
-MVP API is read-only.
+MVP API is read-only. Allowed views: current ladder state with sub-signals
+and reason codes, notifications history, scoreboard account (vs 0050
+total-return benchmark), positions, dividends, virtual orders/fills,
+rejected orders, risk status, validation gate status (N, PBO/DSR, holdout
+lock, paper-day counter), runtime health, data freshness/reconciliation.
 
-Allowed views:
+Forbidden: manual buy/sell, real order submit, credential management,
+broker account access, changing risk limits from the API.
 
-- current signal state per asset (ladder position, sub-signals, reason codes)
-- notifications history
-- account (scoreboard)
-- positions
-- signals
-- virtual orders
-- virtual fills
-- rejected orders
-- risk status
-- validation gate status (trial count N, PBO/DSR when computed, holdout lock)
-- runtime health
-- data freshness
-
-Forbidden endpoints/actions:
-
-- manual buy
-- manual sell
-- real order submit
-- API key management
-- private exchange account access
-- changing risk limits from public API
-
-MVP dashboard should stay simple:
-
-```text
-FastAPI
-Jinja2 or static HTML
-browser polling JSON endpoints
-```
-
-Do not introduce a full frontend framework unless a later goal authorizes it.
+Stack: FastAPI + static HTML (`src/api/templates/dashboard.html`) + browser
+polling JSON. No frontend framework unless a later goal authorizes it.
 
 ---
 
 ## 12. Research Rules
 
-Research is not a Core MVP blocker, but the VALIDATION GATE tooling is
-(Goal K): trial registry, CSCV/PBO, DSR, and the locked holdout are core
-infrastructure, not research extras. Full rules:
+The VALIDATION GATE tooling is core infrastructure (Goal TW-E): trial
+registry, CSCV/PBO, DSR, locked holdout. Full rules:
 `docs/contracts/VALIDATION_GATE_CONTRACT.md`.
 
 Non-negotiable from the first backtest onward:
 
-- every backtest run is registered (unregistered results are void)
-- the final ~12 months of data are locked as single-use holdout
+- every backtest run is registered (unregistered results are void);
+  TW's N starts at zero in this repository — the crypto sibling's registry
+  does not carry over and its artifacts were deleted at fork time
+- the final ~12 months are locked as single-use holdout
 - iterated out-of-sample is not out-of-sample
+- the PRE-REGISTERED PRIMARY CLAIM (MaxDD ≤ 60%×B&H and CAGR ≥ B&H−3pp,
+  dividend-adjusted, full costs) may not be modified after trial #1
+- every benchmark comparison uses 0050 total-return buy-and-hold;
+  price-only TAIEX comparisons are void
 
-Allowed after Core MVP through pre-registered experiments (Goal P):
-
-- bounded parameter search
-- walk-forward validation
-- holdout testing
-- cost stress testing
-- Monte Carlo robustness checks
-- research report
-
-Forbidden in Core MVP:
-
-- full genetic algorithm optimizer
-- HMM regime engine
-- neural network strategy
-- reinforcement learning
-- unlimited parameter search
-- multi-strategy auto-selection
-- automatic runtime deployment from research winners
-
-Anti-overfitting rule:
+Forbidden in Core MVP: GA optimizers, HMM engines, neural strategies,
+reinforcement learning, unlimited parameter search, auto-deployment of
+research winners.
 
 ```text
 Research exists to reject fragile parameters, not to find magical parameters.
@@ -510,59 +377,20 @@ Research exists to reject fragile parameters, not to find magical parameters.
 
 ## 13. Extension Rules
 
-Future features are allowed only by explicit contract.
+New strategy / new data source / research lab: each requires its own
+contract, tests, declared inputs/outputs, no direct orders, no broker API,
+no risk bypass. New ASSETS additionally require a pre-registered experiment
+and their own gate pass.
 
-### 13.1 Adding A New Strategy
-
-Requires:
-
-- new strategy contract
-- tests
-- declared inputs
-- declared outputs
-- no direct orders
-- no private API
-- no risk bypass
-
-### 13.2 Adding A New Data Source
-
-Requires:
-
-- data adapter contract
-- public/private boundary declaration
-- closed-candle proof
-- timestamp rules
-- tests
-
-### 13.3 Adding Research Lab
-
-Requires:
-
-- research contract
-- trial ledger rules
-- reporting rules
-- no automatic runtime deployment
-
-### 13.4 Live Trading / Auto-Execution
-
-PERMANENTLY EXCLUDED by product definition (v0.9). The user is the only
-executor. No future contract may re-introduce order submission, private API
-access, or key custody into this product. If that need ever truly arises, it is
-a different product in a different repository.
+Live trading / auto-execution: PERMANENTLY EXCLUDED by product definition.
+If that need ever truly arises, it is a different product in a different
+repository.
 
 ---
 
 ## 14. Testing And Verification
 
-### 14.1 General Rule
-
-Use tests to prove behavior. Do not rely on comments or assumptions.
-
-Prefer narrow tests first, then broader tests.
-
-### 14.2 Required Baseline Checks
-
-Before claiming Core MVP complete:
+### 14.1 Required Baseline Checks
 
 ```bash
 ruff check .
@@ -572,64 +400,43 @@ lint-imports
 pytest -m "not network" tests -q
 ```
 
-Unit tests and CI tests must not hit Binance or any external network.
+Unit tests must not hit TWSE, FinMind, or any external network. Public-data
+smokes are manual and marked `pytest.mark.network`.
 
-Public-network smoke tests must be explicit manual checks marked with:
+### 14.2 Required Test Themes
 
-```text
-pytest.mark.network
-```
+Always test (carried from the crypto edition):
 
-### 14.3 Required Test Themes
+- no SHORT signal; no negative position; fraction only in {0,.25,.5,.75,1}
+- no sell greater than holdings; no still-open candle signal
+- no decision before the 200-close warmup; no same-bar execution
+- no order below minimum notional; no exposure increase on stale data
+- no duplicate order/notification after restart; notification persisted
+  before delivery with reason codes
+- every backtest run appears in the trial registry; holdout lock is
+  single-use (second unlock fails)
+- virtual account ledger balances after every event
 
-Always test:
+TW additions (each proven by golden tests as the goals land):
 
-- no `SHORT` signal
-- no negative position
-- no negative exposure fraction; fraction only in {0, .25, .5, .75, 1}
-- no sell greater than current holdings
-- no still-open candle signal
-- no decision before the 200-close warmup
-- no same-bar execution
-- no order below minimum notional
-- no order violating exchange filters
-- no exposure increase on stale data
-- no duplicate order after runtime restart
-- no duplicate notification after runtime restart
-- notification persisted before delivery, with reason codes
-- every backtest run appears in the trial registry
-- holdout lock is single-use (second unlock attempt fails)
-- paper broker never calls private API
-- virtual account ledger balances after fills
+- calendar: LNY block, make-up-Saturday closed, cross-year, typhoon protocol
+- adjustments: 0050 2025-06 split (÷4, 5-session halt), dividend factors,
+  TWT49U pre-2011 schema
+- dual series: SMA reads adjusted, ledger books raw
+- dividends: accrual/payment lifecycle; split equity invariance
+- costs: min-fee erosion; sell-only tax by instrument; tick-bracket rounding
+- risk: disaster dual trigger (single-day -9% / 3-session -15%);
+  staleness in trading days (LNY is not staleness); LIMIT_DAY flagging
+- reconciliation: TWSE/FinMind mismatch blocks strategy input
 
 ---
 
 ## 15. Git And Change Discipline
 
-Goal A must initialize the repository:
-
-```text
-git init
-create .gitignore
-create main branch
-create pyproject.toml
-create requirements/constraints-dev.txt
-create docker-compose.yml
-create src/, tests/, configs/, docs/contracts/ scaffold
-commit the base contract documents and scaffold as the initial commit
-do not configure a remote
-do not push
-```
-
 ### 15.1 Keep Diffs Reviewable
 
-Do not mix unrelated concerns in one commit.
-
-Examples:
-
-- Do not modify strategy and database schema in the same commit unless the goal requires it.
-- Do not modify dashboard and execution logic in the same commit.
-- Do not add a future research feature while working on Core MVP runtime.
+Do not mix unrelated concerns in one commit (strategy vs schema, dashboard
+vs execution, research features during Core MVP work).
 
 ### 15.2 Commit Message Format
 
@@ -647,34 +454,34 @@ Tested: <verification run>
 Not-tested: <known gaps>
 ```
 
-Do not add `Co-authored-by: OmX` unless the human explicitly requests that convention.
-
 ---
 
 ## 16. Stop Conditions
 
 Stop and report if a task requires:
 
-- storing or exposing secrets
-- enabling real order submission or any auto-execution
-- using private exchange API
+- storing or exposing credentials of any kind
+- enabling real order submission, any auto-execution, or any broker API
 - adding leverage, margin, derivatives, or short exposure
 - weakening risk rules to make a bad action pass
-- using still-open candles for signals
+- feeding raw (unadjusted) closes into SMA features
+- comparing performance against a price-only index
+- using still-open sessions for signals
 - hiding a failed verification result
 - running or citing a backtest outside the trial registry
-- touching the locked holdout outside the single-use Goal O procedure
+- touching the locked holdout outside the single-use TW-H procedure
+- modifying the pre-registered primary claim after trial #1
 - representing unqualified signals as qualified
-- changing universe or cost assumptions after seeing results without recording a new experiment
-- adding research, ML, HMM, GA during Core MVP without authorization
+- adding assets, lookbacks, or variants without pre-registration
+- adding research/ML/HMM/GA during Core MVP without authorization
 
 ---
 
 ## 17. Final Instruction To Agents
 
 ```text
-Build the Core MVP first.
-Keep advanced paths possible.
-Do not implement advanced paths early.
+Build the TW Core MVP first.
+Keep advanced paths possible; do not implement them early.
 Make every action testable, explainable, and auditable.
+The registered claim is drawdown reduction — let the gate tell the truth.
 ```

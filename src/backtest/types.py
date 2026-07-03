@@ -28,7 +28,7 @@ class BacktestParameters:
     slippage_bps: Decimal
     quantity_step: Decimal
     price_tick: Decimal
-    min_notional_usdt: Decimal
+    min_notional_twd: Decimal
     max_drawdown_fraction: Decimal
     daily_loss_pause_fraction: Decimal
     disaster_single_day_drop_fraction: Decimal

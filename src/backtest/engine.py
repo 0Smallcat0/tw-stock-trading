@@ -104,11 +104,11 @@ def run_backtest(
             slippage_bps=parameters.effective_slippage_bps,
             quantity_step=parameters.quantity_step,
             price_tick=parameters.price_tick,
-            min_notional=parameters.min_notional_usdt,
+            min_notional=parameters.min_notional_twd,
         )
     )
     gate_parameters = RiskGateParameters(
-        min_notional_usdt=parameters.min_notional_usdt,
+        min_notional_twd=parameters.min_notional_twd,
         stale_data_max_age_seconds=parameters.stale_data_max_age_seconds,
         max_drawdown_fraction=parameters.max_drawdown_fraction,
         daily_loss_pause_fraction=parameters.daily_loss_pause_fraction,
@@ -373,7 +373,7 @@ def _execute_ladder_change(
             price_tick_size=parameters.price_tick,
             quantity_step_size=parameters.quantity_step,
             min_quantity=parameters.quantity_step,
-            min_notional=parameters.min_notional_usdt,
+            min_notional=parameters.min_notional_twd,
         ),
         risk_state=RiskState(
             peak_equity=ledger.state.peak_equity,

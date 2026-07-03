@@ -1,51 +1,75 @@
-# Strategy Contract: Daily Trend Ensemble
+# Strategy Contract: Daily Trend Ensemble (TW Edition)
 
-Status: Core MVP Goal J contract (supersedes `STRATEGY_LARGE_LIQUID_TREND_15.md` as the active strategy)
-Evidence basis: `docs/research/SIGNAL_DESIGN_RESEARCH.md` §3.2-3.3 (2026-07-02)
+Status: TW Core MVP strategy contract (Goal TW-A adoption; carried from the crypto edition with TW amendments)
+Evidence basis: `docs/research/TW_SIGNAL_DESIGN_RESEARCH.md` (2026-07-03)
 
 ## Purpose
 
-`Daily Trend Ensemble` converts one asset's closed DAILY candles into one auditable
-target-exposure decision per day. It is a long-only, time-series trend rule:
-trend up → hold, trend down → cash.
+`Daily Trend Ensemble` converts one asset's closed DAILY candles (Taipei close)
+into one auditable target-exposure decision per trading day. It is a long-only,
+time-series trend rule: trend up → hold, trend down → cash.
 
-It does not submit orders, choose final position size in quote terms, inspect
+It does not submit orders, choose final position size in TWD terms, inspect
 account state, or bypass risk.
 
 Plain language:
 
 ```text
-每天收盤看一次：價格站在幾條長短均線上方，就持有幾分之幾。
+每個交易日收盤看一次：還原價站在幾條長短均線上方，就持有幾分之幾。
 四條都站上 → 滿額。全部跌破 → 空手。中間就是 25% 一階的階梯。
 ```
 
-## Why An Ensemble (design rationale, from verified evidence)
+## Value Proposition (TW-specific, pre-registered)
 
-- Daily MA trend rules beat buy-and-hold after 10-50bps costs in verified
-  2014-2023 samples — but WHICH single lookback is best was chosen in-sample by
-  the papers, and the claim "shorter lookbacks dominate" failed adversarial
-  verification (1-2).
-- The ensemble spreads single-parameter selection risk across four verified-family
-  lookbacks and keeps the registered trial count N minimal (one strategy, zero
-  tunable lookbacks).
+The crypto edition's evidence ("daily MA rules beat buy-and-hold after costs")
+does NOT transfer to Taiwan. The registered claim for this contract is:
+
+```text
+PRIMARY CLAIM — drawdown reduction, explicitly NOT return enhancement:
+  MaxDD(strategy) <= 60% x MaxDD(0050 total-return buy-and-hold)
+  AND CAGR(strategy) >= CAGR(0050 total-return buy-and-hold) - 3pp
+  after full costs, on dividend-adjusted series, idle-cash yield 0%
+  (sensitivity rerun at 1.5%).
+```
+
+The mandatory benchmark is 0050 buy-and-hold with dividends reinvested (the
+TWSE total-return index is the secondary reference). Comparisons against the
+price-only TAIEX are void: the dividend wedge is ~3.5-4%/yr since 2003.
+
+If the registered backtest plus holdout cannot satisfy both conditions, the
+honest verdict is "Taiwan gets buy-and-hold, not this signal" — a FAIL report
+is a successful outcome of the process.
+
+## Why An Ensemble (design rationale)
+
+- Which single lookback is best is an in-sample artifact; the ensemble spreads
+  single-parameter selection risk across four lookbacks and keeps the
+  registered trial count N minimal (one strategy, zero tunable lookbacks).
+- Fractional ladder sizing (vs binary all-in/all-out) halves the cost of
+  whipsaw regimes — the dominant TW failure mode (2010-2016 sideways,
+  2023-2026 melt-up with V-shaped crash interruptions).
 
 ## Inputs
 
-- Per-asset daily closed candles (UTC close), from the public data layer.
+- Per-asset daily closed candles (Taipei close), from the public data layer.
+- Signal input series: DIVIDEND/SPLIT-ADJUSTED closes (the adjustment pipeline
+  contract lives in `docs/contracts/DATA_ADAPTER_TWSE.md`). Raw closes feed
+  accounting and display, never SMA computation — otherwise every ex-dividend
+  day is a false trend break.
 - Warmup: no decision until at least `200` daily closes are available.
-- All values `Decimal`; all timestamps UTC-aware.
+- All values `Decimal`; all timestamps UTC-aware (Taipei close = 05:30 UTC).
 
 Required derived features (from the feature pipeline, closed candles only):
 
 - `sma_20`, `sma_65`, `sma_150`, `sma_200`: arithmetic means of the last
-  N daily closes, computed at close `t` using closes `<= t`.
+  N adjusted daily closes, computed at close `t` using closes `<= t`.
 
 ## Signal Construction (contract-fixed)
 
-Sub-signals at daily close `t`:
+Sub-signals at daily close `t` (adjusted close):
 
 ```text
-s_n = 1 if close_t > sma_n(t) else 0,  for n in {20, 65, 150, 200}
+s_n = 1 if adj_close_t > sma_n(t) else 0,  for n in {20, 65, 150, 200}
 ```
 
 Target exposure fraction:
@@ -55,13 +79,14 @@ exposure_fraction = (s_20 + s_65 + s_150 + s_200) / 4
                   ∈ {0, 0.25, 0.50, 0.75, 1.00}
 ```
 
-Boundary rule: `close_t == sma_n(t)` counts as NOT above (`s_n = 0`).
+Boundary rule: `adj_close_t == sma_n(t)` counts as NOT above (`s_n = 0`).
 Conservative by construction.
 
 The four lookbacks `{20, 65, 150, 200}` are FIXED BY THIS CONTRACT and uniform
-across all assets. Changing any lookback, adding a lookback, or per-asset tuning
-is a new strategy variant: it requires pre-registration in the trial registry and
-a new or amended contract. This is an anti-overfitting rule, not a style choice.
+across all assets. Changing any lookback, adding a lookback, adding hysteresis
+bands, or per-asset tuning is a new strategy variant: it requires
+pre-registration in the trial registry and a new or amended contract. This is
+an anti-overfitting rule, not a style choice.
 
 ## Output
 
@@ -74,22 +99,23 @@ Each decision contains only:
 - `reason_codes`
 - `generated_at_bar_close`: the daily close timestamp (UTC)
 - `executable_from_next_bar`: strictly after `generated_at_bar_close`
+  (in practice: the next TRADING day's open)
 
 Reason codes:
 
 | Condition | Code |
 | --- | --- |
-| `close > sma_20` | `ABOVE_SMA_20` else `BELOW_SMA_20` |
-| `close > sma_65` | `ABOVE_SMA_65` else `BELOW_SMA_65` |
-| `close > sma_150` | `ABOVE_SMA_150` else `BELOW_SMA_150` |
-| `close > sma_200` | `ABOVE_SMA_200` else `BELOW_SMA_200` |
+| `adj_close > sma_20` | `ABOVE_SMA_20` else `BELOW_SMA_20` |
+| `adj_close > sma_65` | `ABOVE_SMA_65` else `BELOW_SMA_65` |
+| `adj_close > sma_150` | `ABOVE_SMA_150` else `BELOW_SMA_150` |
+| `adj_close > sma_200` | `ABOVE_SMA_200` else `BELOW_SMA_200` |
 | fraction increased vs previous decision | `LADDER_UP` |
 | fraction decreased vs previous decision | `LADDER_DOWN` |
 | fraction unchanged | `LADDER_HOLD` |
 
-With fewer than 200 daily closes NO decision is produced (see Inputs): the
-feature layer emits no snapshot, and the runtime records a
-`WARMUP_INSUFFICIENT_HISTORY` health event instead of a strategy decision.
+With fewer than 200 daily closes NO decision is produced: the feature layer
+emits no snapshot, and the runtime records a `WARMUP_INSUFFICIENT_HISTORY`
+health event instead of a strategy decision.
 
 ## Ladder-Change Semantics (what triggers a notification)
 
@@ -101,25 +127,40 @@ feature layer emits no snapshot, and the runtime records a
 
 ## Relationship To Other Layers
 
-- The strategy emits a FRACTION of the asset's risk budget, never a quote amount.
+- The strategy emits a FRACTION of the asset's risk budget, never a TWD amount.
 - Portfolio maps `exposure_fraction × asset_risk_budget` to target weights
-  (Core MVP budgets: BTC 50%, ETH 50%; SOL 0% until it passes the validation gate).
+  (TW Core MVP budget: 0050 at 100%; see `docs/contracts/UNIVERSE_CONTRACT.md`).
 - Risk gate approval is still required for every resulting action; the strategy
   cannot bypass it.
-- The paper broker executes approved actions on the scoreboard account; the
-  human executes them (or not) at the real exchange, manually.
+- The paper broker executes approved actions on the scoreboard account at the
+  NEXT TRADING DAY's open; the human executes them (or not) at their broker,
+  manually.
 
 ## Safety Rules
 
 - Long-only: `exposure_fraction` is never negative; SHORT is unrepresentable.
-- Decisions use only closed daily candles; still-open candles are blocked upstream.
-- A decision generated at close `t` is executable no earlier than the next bar.
+- Decisions use only closed daily candles; still-open sessions never enter.
+- A decision generated at close `t` is executable no earlier than the next
+  trading day.
 - Deterministic: identical candle history → identical decision.
 - Public data only; no account, order, or broker state may be read.
 
-## Explicitly Out Of Scope (requires pre-registered research, Goal P)
+## Caveats (documented honestly, from the research)
 
-- Regime filter (e.g., hold ETH/SOL only when BTC > 200d SMA)
-- Stop overlays (trailing / volatility-scaled / time stops)
-- Donchian-channel ensemble variant
-- Any additional asset, lookback, or weighting scheme
+- 0050 is ~57-64% TSMC (2025-26): "index timing" is materially a single-stock
+  trend rule on 2330 plus a diversified tail, and it correlates with the
+  global AI cycle.
+- Under the ±10% daily price limit, exits signaled on a limit-down day may
+  execute into further declines (2025-04-07: 0050's first-ever limit-down
+  close; the crash spread over three sessions, ~-18%).
+- The current regime (V-shaped crashes inside a melt-up, 2023-2026) is the
+  WORST regime for this rule. This is known and accepted at registration time.
+
+## Explicitly Out Of Scope (requires pre-registered research)
+
+- Hysteresis/band variants; Donchian ensemble variant
+- Regime filters; stop overlays
+- 2330 or any additional asset (2330 is excluded by evidence — see universe
+  contract)
+- Same-day execution via the 14:00-14:30 fixed-price session (execution-timing
+  experiment, not MVP)

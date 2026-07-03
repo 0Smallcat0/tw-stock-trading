@@ -1,22 +1,22 @@
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
-    container_name: crypto_trading_timescaledb
+    container_name: tw_stock_trading_timescaledb
     environment:
-      POSTGRES_USER: crypto
-      POSTGRES_PASSWORD: crypto_dev_only
-      POSTGRES_DB: crypto_quant
+      POSTGRES_USER: tw
+      POSTGRES_PASSWORD: tw_dev_only
+      POSTGRES_DB: tw_quant
     ports:
-      - "54320:5432"
+      # 54321 keeps the TW database clear of the crypto sibling on 54320.
+      - "54321:5432"
     volumes:
-      - timescaledb_data:/var/lib/postgresql/data
+      - tw_timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U crypto -d crypto_quant"]
+      test: ["CMD-SHELL", "pg_isready -U tw -d tw_quant"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
 
 volumes:
-  timescaledb_data:
-
+  tw_timescaledb_data:

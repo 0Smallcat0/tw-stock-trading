@@ -11,7 +11,6 @@ from src.config.models import (
     RuntimeConfig,
     StorageConfig,
     StrategyConfig,
-    StrategyParametersConfig,
     VirtualAccountConfig,
     config_snapshot,
     load_config,

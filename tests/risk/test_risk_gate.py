@@ -86,12 +86,12 @@ def _account(equity: Decimal = Decimal("1000")) -> VirtualAccountSnapshot:
 
 def _parameters(
     *,
-    min_notional_usdt: Decimal = Decimal("10"),
+    min_notional_twd: Decimal = Decimal("10"),
     max_drawdown_fraction: Decimal = Decimal("0.20"),
     daily_loss_pause_fraction: Decimal = Decimal("0.05"),
 ) -> RiskGateParameters:
     return RiskGateParameters(
-        min_notional_usdt=min_notional_usdt,
+        min_notional_twd=min_notional_twd,
         stale_data_max_age_seconds=120,
         max_drawdown_fraction=max_drawdown_fraction,
         daily_loss_pause_fraction=daily_loss_pause_fraction,
@@ -331,7 +331,7 @@ def test_minimum_quantity_violation_is_rejected() -> None:
 def test_configured_minimum_notional_violation_is_rejected() -> None:
     decision = _evaluate(
         _intent(quantity=Decimal("0.0002")),
-        parameters=_parameters(min_notional_usdt=Decimal("20")),
+        parameters=_parameters(min_notional_twd=Decimal("20")),
     )
 
     assert decision.status is RiskDecisionStatus.REJECTED
@@ -341,7 +341,7 @@ def test_configured_minimum_notional_violation_is_rejected() -> None:
 def test_exchange_minimum_notional_violation_is_rejected() -> None:
     decision = _evaluate(
         _intent(quantity=Decimal("0.0002")),
-        parameters=_parameters(min_notional_usdt=Decimal("5")),
+        parameters=_parameters(min_notional_twd=Decimal("5")),
         context=_context(exchange_filters=_filters(min_notional=Decimal("11"))),
     )
 
@@ -478,7 +478,7 @@ def test_reason_codes_are_deterministically_ordered() -> None:
             earliest_execution_time=_now() + timedelta(milliseconds=1),
             exchange_filters=None,
         ),
-        parameters=_parameters(min_notional_usdt=Decimal("20")),
+        parameters=_parameters(min_notional_twd=Decimal("20")),
     )
 
     assert decision.status is RiskDecisionStatus.REJECTED

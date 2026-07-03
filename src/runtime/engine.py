@@ -285,7 +285,7 @@ class SignalRuntime:
                 slippage_bps=self._parameters.slippage_bps,
                 quantity_step=self._parameters.quantity_step,
                 price_tick=self._parameters.price_tick,
-                min_notional=self._parameters.min_notional_usdt,
+                min_notional=self._parameters.min_notional_twd,
             )
         )
         # Sizing basis is frozen BEFORE any fill so per-symbol targets are
@@ -451,7 +451,7 @@ class SignalRuntime:
                 price_tick_size=parameters.price_tick,
                 quantity_step_size=parameters.quantity_step,
                 min_quantity=parameters.quantity_step,
-                min_notional=parameters.min_notional_usdt,
+                min_notional=parameters.min_notional_twd,
             ),
             risk_state=RiskState(
                 peak_equity=ledger.state.peak_equity,
@@ -459,7 +459,7 @@ class SignalRuntime:
             ),
         )
         gate_parameters = RiskGateParameters(
-            min_notional_usdt=parameters.min_notional_usdt,
+            min_notional_twd=parameters.min_notional_twd,
             stale_data_max_age_seconds=parameters.stale_data_max_age_seconds,
             max_drawdown_fraction=parameters.max_drawdown_fraction,
             daily_loss_pause_fraction=parameters.daily_loss_pause_fraction,
@@ -794,9 +794,9 @@ class SignalRuntime:
         self, ordered: Mapping[str, tuple[Candle, ...]]
     ) -> dict[str, Candle]:
         latest = {symbol_value: candles[-1] for symbol_value, candles in ordered.items()}
-        # Align by trading day, not exact close timestamp: exchange-maintenance
-        # days produce truncated daily candles whose close times differ by
-        # milliseconds across symbols (e.g. Binance 2018-02-08).
+        # Align by trading day, not exact close timestamp: half-session or
+        # postponed-close days may produce daily candles whose close times
+        # differ slightly across symbols.
         open_dates = {candle.open_time.date() for candle in latest.values()}
         if len(open_dates) != 1:
             msg = "latest closed candles must align across all budgeted symbols"

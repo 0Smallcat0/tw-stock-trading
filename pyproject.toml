@@ -3,16 +3,15 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crypto-trading"
+name = "tw-stock-trading"
 version = "0.1.0"
-description = "Crypto spot long-only paper trading MVP foundation."
+description = "TW stock long-only daily signal MVP with a paper scoreboard."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic",
     "PyYAML",
     "httpx",
-    "websockets",
     "SQLAlchemy",
     "alembic",
     "psycopg",
@@ -36,6 +35,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src", "src.*", "scripts", "scripts.*"]
+
+[tool.setuptools.package-data]
+"src.api" = ["templates/*.html"]
 
 [tool.ruff]
 target-version = "py312"

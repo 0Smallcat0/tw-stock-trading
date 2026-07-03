@@ -203,7 +203,7 @@ def _check_notional(
         return
 
     notional = intent.quantity * context.reference_price
-    if notional < parameters.min_notional_usdt:
+    if notional < parameters.min_notional_twd:
         reason_codes.append(MIN_NOTIONAL_NOT_MET)
 
     filters = context.exchange_filters

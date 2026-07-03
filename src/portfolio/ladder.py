@@ -53,7 +53,7 @@ class LadderPortfolioParameters:
                 msg = "risk budget symbols must be non-empty strings"
                 raise PortfolioValidationError(msg)
             if "/" in symbol_value:
-                msg = "risk budget symbols must use Binance-native format, for example BTCUSDT"
+                msg = "risk budget symbols must use exchange-native codes, for example 0050"
                 raise PortfolioValidationError(msg)
             if not isinstance(budget, Decimal) or not budget.is_finite():
                 msg = f"risk budget for {symbol_value} must be a finite Decimal"

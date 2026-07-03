@@ -1,6 +1,34 @@
 # Risk Gate Contract
 
-Status: Core MVP Goal H contract
+Status: Core MVP contract (carried from the crypto edition; TW amendments below)
+
+## TW Amendments (2026-07-03, land with Goal TW-D)
+
+Taiwan market structure changes four risk semantics; the gate interface and
+everything else in this contract carry over unchanged:
+
+1. **Disaster event redefined.** Under the ±10% daily price limit a -20%
+   single-day close is impossible. TW triggers: single-day close-to-close
+   return <= -9% (limit-down territory; precedent 2025-04-07, 0050's
+   first-ever limit-down close) OR rolling 3-session cumulative return
+   <= -15% (precedent: 2025-04 tariff crash, ~-18% in three sessions).
+   Both produce the forced re-evaluation notification; they are risk events,
+   not strategy parameters.
+2. **Staleness in trading days, not seconds.** Weekends, holidays (Lunar New
+   Year: up to 11 calendar days), make-up-workday closures, typhoon closures,
+   and corporate-action suspensions are not staleness. Rule: data older than
+   `stale_trading_days` TRADING days per the exchange calendar → halt new
+   exposure increases; risk-reducing exits remain allowed.
+3. **Drawdown pause recalibrated.** Expected strategy drawdown band is
+   15-25% (vs 0050 buy-and-hold worst -58% in 2008); the pause default is
+   0.40 — above the expected band, low enough to matter. The crypto lesson
+   stands: a pause inside the normal band locks the strategy out permanently.
+4. **Price-limit awareness.** Fills whose execution-day open sits at the
+   daily limit are flagged `LIMIT_DAY` (health event + fill annotation);
+   the deferred-fill model for locked sessions is a registered experiment,
+   not MVP behavior. Exchange filters for TW are the bracketed tick table
+   and share-lot granularity (odd lot = 1 share) instead of Binance-style
+   filter payloads.
 
 ## Purpose
 

@@ -79,7 +79,7 @@ def _parameters() -> RuntimeParameters:
         slippage_bps=Decimal("5"),
         quantity_step=Decimal("0.000001"),
         price_tick=Decimal("0.01"),
-        min_notional_usdt=Decimal("10"),
+        min_notional_twd=Decimal("10"),
         max_drawdown_fraction=Decimal("0.20"),
         daily_loss_pause_fraction=Decimal("0.05"),
         disaster_single_day_drop_fraction=Decimal("0.20"),

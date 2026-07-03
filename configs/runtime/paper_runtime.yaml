@@ -1,23 +1,19 @@
 version: "1"
 data_source:
-  provider: binance_spot_public
+  provider: twse_public
   symbols:
-    - BTCUSDT
-    - ETHUSDT
-    - SOLUSDT
+    - "0050"
   timeframe: 1d
-  rest_base_url_candidates:
-    - https://data-api.binance.vision
-    - https://api.binance.com
-    - https://api-gcp.binance.com
-    - https://api1.binance.com
-    - https://api2.binance.com
-    - https://api3.binance.com
-    - https://api4.binance.com
-  ws_stream_base_url_candidates:
-    - wss://data-stream.binance.vision/stream
-    - wss://stream.binance.com:443/stream
-    - wss://stream.binance.com:9443/stream
+  twse_rwd_base_url: https://www.twse.com.tw
+  twse_openapi_base_url: https://openapi.twse.com.tw
+  finmind_api_base_url: https://api.finmindtrade.com
+  backfill_provider: finmind_public
+  # TWSE daily OHLCV is final around 17:30 Taipei (odd-lot + block volume);
+  # the daily job never runs earlier than 18:00 Taipei.
+  daily_job_time_taipei: "18:00"
+  # TWSE rate limits are undocumented; sequential requests spaced >= 3s
+  # avoid the community-reported IP bans.
+  min_request_interval_seconds: "3"
   timeout_seconds: "10"
   private_api_enabled: false
   api_key_required: false
@@ -30,57 +26,67 @@ strategy:
     - FLAT
   allow_short: false
 portfolio:
-  max_active_positions: 3
-  max_symbol_weight: "0.35"
+  # Decision universe: 0050 alone at 100% risk budget. 2330 single-stock
+  # timing is excluded by evidence; a second asset needs its own gate pass
+  # (docs/contracts/UNIVERSE_CONTRACT.md).
+  max_active_positions: 1
+  max_symbol_weight: "1.0"
   max_gross_exposure: "1.0"
   cash_allowed: true
   cooldown_enabled: true
   allow_short: false
-  # v0.9 decision universe: SOLUSDT stays out until it passes the validation gate.
   risk_budgets:
-    BTCUSDT: "0.5"
-    ETHUSDT: "0.5"
+    "0050": "1.0"
 risk:
-  min_notional_usdt: "10"
-  stale_data_max_age_seconds: 129600
-  # Research expects 50-60% drawdowns as normal for the daily trend ensemble
-  # (docs/research/SIGNAL_DESIGN_RESEARCH.md section 4); the pause is a
-  # disaster brake above that band. Trial 1 proved 0.20 locks the strategy out.
-  max_drawdown_fraction: "0.65"
-  daily_loss_pause_fraction: "0.10"
-  disaster_single_day_drop_fraction: "0.20"
+  min_notional_twd: "10000"
+  # Interim wall-clock staleness; Goal TW-D replaces it with a trading-day
+  # rule over the exchange calendar (weekends/holidays are not staleness).
+  stale_data_max_age_seconds: 345600
+  # Expected strategy drawdown band is 15-25%; the pause is a disaster brake
+  # above that band (0050 buy-and-hold worst case was -58% in 2008).
+  max_drawdown_fraction: "0.40"
+  daily_loss_pause_fraction: "0.095"
+  # Under the ±10% price limit a -20% day is impossible; -9% is limit-down
+  # territory (2025-04-07: 0050's first-ever limit-down close).
+  disaster_single_day_drop_fraction: "0.09"
   short_exposure_enabled: false
   margin_enabled: false
   leverage_enabled: false
 execution:
   mode: paper
-  fee_bps: "10"
+  # Interim flat-bps model. Goal TW-D introduces the full TW cost model:
+  # commission 0.1425%/side x broker discount with a minimum fee, sell-only
+  # transaction tax (ETF 0.1% / stock 0.3%), bracketed tick table.
+  fee_bps: "13.5"
   slippage_bps: "5"
-  quantity_step: "0.000001"
-  price_tick: "0.01"
+  # Odd-lot share granularity; 0050 is the most-traded odd-lot name on TWSE.
+  quantity_step: "1"
+  # ETF tick bracket at 0050's current price (>= NT$50).
+  price_tick: "0.05"
   real_orders_enabled: false
   private_api_enabled: false
   margin_enabled: false
   leverage_enabled: false
 account:
   account_id: paper-main
-  initial_cash: "1000"
-  quote_asset: USDT
+  initial_cash: "100000"
+  quote_asset: TWD
 runtime:
   mode: paper
   decision_timeframe: 1d
   config_snapshot_required: true
   halt_on_stale_data: true
-  idempotency_key_namespace: paper-runtime
+  idempotency_key_namespace: tw-paper-runtime
   real_trading_enabled: false
   private_api_enabled: false
 storage:
   backend: postgresql
   host: localhost
-  port: 54320
-  database: crypto_quant
-  username: crypto
-  password: crypto_dev_only
+  # 54321 avoids colliding with the crypto sibling project's DB on 54320.
+  port: 54321
+  database: tw_quant
+  username: tw
+  password: tw_dev_only
   snapshot_directory: docs/reports/config-snapshots
   trial_registry_path: docs/reports/research/trial_registry.jsonl
   holdout_lock_path: docs/reports/research/holdout_lock.json
@@ -94,7 +100,7 @@ notifications:
 api_dashboard:
   enabled: true
   host: 127.0.0.1
-  port: 8000
+  port: 8001
   read_only: true
   manual_orders_enabled: false
   risk_limit_mutation_enabled: false
