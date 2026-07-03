@@ -108,6 +108,8 @@ class BacktestMetrics:
     rejected_count: int
     total_fees: Decimal
     total_slippage: Decimal
+    total_traded_notional: Decimal
+    annualized_turnover: Decimal
     benchmark_final_equity: Decimal
     observation_days: int
 
@@ -233,6 +235,8 @@ class BacktestReport:
                 "rejected_count": self.metrics.rejected_count,
                 "total_fees": str(self.metrics.total_fees),
                 "total_slippage": str(self.metrics.total_slippage),
+                "total_traded_notional": str(self.metrics.total_traded_notional),
+                "annualized_turnover": str(self.metrics.annualized_turnover),
                 "benchmark_final_equity": str(self.metrics.benchmark_final_equity),
                 "observation_days": self.metrics.observation_days,
             },

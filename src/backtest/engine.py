@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
@@ -193,7 +194,7 @@ def run_backtest(
             if desired_fraction == executed_fraction[symbol_value]:
                 continue
             order_sequence += 1
-            outcome_codes = _execute_ladder_change(
+            outcome = _execute_ladder_change(
                 ledger=ledger,
                 broker=broker,
                 gate_parameters=gate_parameters,
@@ -210,11 +211,14 @@ def run_backtest(
                 order_id=f"bt-{order_sequence:06d}-{symbol_value}",
                 start_of_day_equity=start_of_day_equity,
             )
-            if outcome_codes is None:
-                executed_fraction[symbol_value] = desired_fraction
+            if outcome.achieved is not None:
+                executed_fraction[symbol_value] = outcome.achieved
             else:
-                risk_rejections.append((symbol_value, execution_time, outcome_codes))
-                if _NON_RETRIABLE_REJECTION_CODES.intersection(outcome_codes):
+                if not outcome.broker_recorded:
+                    # Broker rejections already live in broker.rejected_orders;
+                    # recording them here too would double-count the metric.
+                    risk_rejections.append((symbol_value, execution_time, outcome.reason_codes))
+                if _NON_RETRIABLE_REJECTION_CODES.intersection(outcome.reason_codes):
                     executed_fraction[symbol_value] = desired_fraction
 
         close_prices = {
@@ -264,6 +268,15 @@ def run_backtest(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _LadderOutcome:
+    """Result of one ladder-change attempt: achieved fraction or rejection."""
+
+    achieved: Decimal | None
+    reason_codes: tuple[str, ...] = ()
+    broker_recorded: bool = False
+
+
 def _execute_ladder_change(
     *,
     ledger: VirtualAccountLedger,
@@ -281,13 +294,16 @@ def _execute_ladder_change(
     execution_time: datetime,
     order_id: str,
     start_of_day_equity: Decimal,
-) -> tuple[str, ...] | None:
-    """Build, gate, and execute one ladder-change order; None means filled."""
+) -> _LadderOutcome:
+    """Build, gate, and execute one ladder-change order."""
 
     reference_price = open_prices[symbol.value]
     state = ledger.state
     current_position = _domain_position(state, symbol)
     delta_fraction = desired_fraction - current_fraction
+    # The ladder step's cash claim; costs live INSIDE it so simultaneous
+    # full-budget buys cannot starve whichever symbol trades last.
+    intended_notional = abs(delta_fraction) * budget * equity_at_open
 
     if delta_fraction < Decimal("0"):
         side = OrderSide.SELL
@@ -295,9 +311,8 @@ def _execute_ladder_change(
         if desired_fraction == Decimal("0"):
             quantity = held_quantity
         else:
-            target_notional = abs(delta_fraction) * budget * equity_at_open
             quantity = min(
-                _round_down(target_notional / reference_price, parameters.quantity_step),
+                _round_down(intended_notional / reference_price, parameters.quantity_step),
                 held_quantity,
             )
     else:
@@ -306,12 +321,16 @@ def _execute_ladder_change(
         # fee on the gross fill notional) so an affordable-sized buy can never
         # bounce off the broker's cash check by a rounding hair.
         fee_rate = parameters.effective_fee_bps / _BPS
+        cost_rate = (
+            Decimal("1") + (parameters.effective_fee_bps + parameters.effective_slippage_bps) / _BPS
+        )
         estimated_fill_price = _round_up(
             reference_price * (Decimal("1") + parameters.effective_slippage_bps / _BPS),
             parameters.price_tick,
         )
-        target_notional = delta_fraction * budget * equity_at_open
-        target_quantity = _round_down(target_notional / reference_price, parameters.quantity_step)
+        target_quantity = _round_down(
+            intended_notional / cost_rate / reference_price, parameters.quantity_step
+        )
         affordable_quantity = _round_down(
             state.cash / (estimated_fill_price * (Decimal("1") + fee_rate)),
             parameters.quantity_step,
@@ -325,7 +344,7 @@ def _execute_ladder_change(
             occurred_at=execution_time,
             reason_codes=(ZERO_QUANTITY_AFTER_ROUNDING,),
         )
-        return (ZERO_QUANTITY_AFTER_ROUNDING,)
+        return _LadderOutcome(achieved=None, reason_codes=(ZERO_QUANTITY_AFTER_ROUNDING,))
 
     intent = OrderIntent(
         symbol=symbol,
@@ -369,7 +388,7 @@ def _execute_ladder_change(
             occurred_at=execution_time,
             reason_codes=risk_decision.reason_codes,
         )
-        return risk_decision.reason_codes
+        return _LadderOutcome(achieved=None, reason_codes=risk_decision.reason_codes)
 
     order = VirtualOrder(
         order_id=order_id,
@@ -394,10 +413,17 @@ def _execute_ladder_change(
             occurred_at=execution_time,
             reason_codes=reason_codes,
         )
-        return reason_codes
+        return _LadderOutcome(achieved=None, reason_codes=reason_codes, broker_recorded=True)
 
     ledger.apply_fill(result.fill, mark_prices=_mark_prices(open_prices, symbols))
-    return None
+    # A cash-capped fill must not masquerade as the full ladder step: track
+    # the fraction actually achieved so the shortfall retries next cycle.
+    actual_cost = result.fill.quantity * result.fill.price + result.fill.fee
+    if intended_notional > Decimal("0") and actual_cost < intended_notional * Decimal("0.99"):
+        achieved = current_fraction + delta_fraction * actual_cost / intended_notional
+    else:
+        achieved = desired_fraction
+    return _LadderOutcome(achieved=achieved)
 
 
 def _require_symbols_match_budgets(
@@ -562,9 +588,20 @@ def _metrics(
 
     total_fees = Decimal("0")
     total_slippage = Decimal("0")
+    total_traded_notional = Decimal("0")
     for fill in fills:
         total_fees += fill.fee
         total_slippage += fill.slippage
+        total_traded_notional += fill.quantity * fill.price
+
+    annualized_turnover = Decimal("0")
+    if equity_curve:
+        mean_equity = sum((point.equity for point in equity_curve), Decimal("0")) / Decimal(
+            len(equity_curve)
+        )
+        years = Decimal(len(equity_curve)) / Decimal(_DAYS_PER_YEAR)
+        if mean_equity > Decimal("0") and years > Decimal("0"):
+            annualized_turnover = total_traded_notional / mean_equity / years
 
     return BacktestMetrics(
         final_equity=final_equity,
@@ -575,6 +612,8 @@ def _metrics(
         rejected_count=rejected_count,
         total_fees=total_fees,
         total_slippage=total_slippage,
+        total_traded_notional=total_traded_notional,
+        annualized_turnover=annualized_turnover,
         benchmark_final_equity=benchmark_final,
         observation_days=len(equity_curve),
     )

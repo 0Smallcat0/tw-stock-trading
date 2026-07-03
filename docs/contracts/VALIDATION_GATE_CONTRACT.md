@@ -60,7 +60,7 @@ headline_metrics (Sharpe, MDD, turnover, n_trades), operator_note
 
 - Compute the Probability of Backtest Overfitting via Combinatorially Symmetric
   Cross-Validation over the registered trial performance matrix:
-  `S = 16` equal disjoint time blocks → `C(16,8) = 12,780` train/test splits.
+  `S = 16` equal disjoint time blocks → `C(16,8) = 12,870` train/test splits.
 - PBO = probability that the in-sample-optimal configuration underperforms the
   median of all configurations out-of-sample.
 - Requirement: `PBO <= 0.05` (the verified Neyman-Pearson convention; the looser

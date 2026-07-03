@@ -36,6 +36,7 @@ from src.backtest.validation import (
     PBOResult,
     ValidationInputError,
     deflated_sharpe_ratio,
+    non_annualized_sharpe_variance,
     probability_of_backtest_overfitting,
     sharpe_ratio,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "initialize_holdout",
     "load_holdout",
     "load_trials",
+    "non_annualized_sharpe_variance",
     "probability_of_backtest_overfitting",
     "require_data_allowed",
     "run_backtest",

@@ -171,3 +171,32 @@ def test_candles_must_cover_exactly_the_budgeted_universe() -> None:
 
     with pytest.raises(BacktestError, match="universe"):
         run_backtest(universe, parameters=_parameters())
+
+
+def test_rejected_count_never_double_counts_and_turnover_is_reported() -> None:
+    report = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
+
+    # Broker rejections and gate rejections are disjoint sets in the metric.
+    assert report.metrics.rejected_count == len(report.rejected_orders) + len(
+        report.risk_rejections
+    )
+    assert report.metrics.total_traded_notional > Decimal("0")
+    assert report.metrics.annualized_turnover > Decimal("0")
+
+
+def test_simultaneous_full_budget_buys_fit_costs_inside_the_ladder_claim() -> None:
+    """Budgets summing to 1 must not starve whichever symbol trades last."""
+
+    report = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
+
+    buys = [fill for fill in report.fills if fill.side is OrderSide.BUY]
+    assert len(buys) == 2
+    total_cost = sum((fill.quantity * fill.price + fill.fee for fill in buys), Decimal("0"))
+    assert total_cost <= Decimal("1000")
+    # Both symbols' buy costs match their equal budgets to within rounding
+    # dust: the fee burden is shared by construction, not dumped on the
+    # alphabetically-last symbol.
+    costs = sorted(fill.quantity * fill.price + fill.fee for fill in buys)
+    assert costs[1] - costs[0] < Decimal("1")
+    # No hidden shortfall: nothing was rejected on the buy day.
+    assert not report.risk_rejections

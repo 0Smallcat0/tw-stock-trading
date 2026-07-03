@@ -86,7 +86,10 @@ Reason codes:
 | fraction increased vs previous decision | `LADDER_UP` |
 | fraction decreased vs previous decision | `LADDER_DOWN` |
 | fraction unchanged | `LADDER_HOLD` |
-| fewer than 200 daily closes | `WARMUP_INSUFFICIENT_HISTORY` (fraction = 0) |
+
+With fewer than 200 daily closes NO decision is produced (see Inputs): the
+feature layer emits no snapshot, and the runtime records a
+`WARMUP_INSUFFICIENT_HISTORY` health event instead of a strategy decision.
 
 ## Ladder-Change Semantics (what triggers a notification)
 

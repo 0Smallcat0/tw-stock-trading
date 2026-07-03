@@ -126,12 +126,25 @@ class SignalRuntime:
 
         latest = self._aligned_latest_candles(ordered)
         close_time = max(candle.close_time for candle in latest.values())
+        decision_time = observed_at or close_time
+
+        # Retry any persisted-but-undelivered notifications first, so a
+        # same-day rerun after a webhook outage still gets the message out.
+        self._flush_undelivered(decision_time)
 
         if self._last_processed is not None and close_time <= self._last_processed:
             return _skipped("ALREADY_PROCESSED")
 
-        decision_time = observed_at or close_time
         health_codes: list[str] = []
+        if self._last_processed is not None:
+            gap_days = (close_time.date() - self._last_processed.date()).days
+            if gap_days > 1:
+                health_codes.append("MISSED_DAYS")
+                self._append_health(
+                    close_time,
+                    "MISSED_DAYS",
+                    {"skipped_decision_days": gap_days - 1},
+                )
         is_stale = decision_time - close_time > timedelta(
             seconds=self._parameters.stale_data_max_age_seconds
         )
@@ -232,7 +245,8 @@ class SignalRuntime:
             },
         )
 
-        # Step 3: mark the scoreboard at this close and persist cycle state.
+        # Step 3: mark the scoreboard at this close and persist cycle state,
+        # THEN deliver: a delivery failure can no longer corrupt the cycle.
         close_snapshot = ledger.snapshot(
             mark_prices={symbols[value]: close_prices[value] for value in symbols},
             captured_at=close_time,
@@ -240,6 +254,7 @@ class SignalRuntime:
         self._start_of_day_equity = close_snapshot.equity
         self._last_processed = close_time
         self._persist_cycle(close_time, decision_time)
+        self._flush_undelivered(decision_time)
 
         return CycleResult(
             processed=True,
@@ -273,6 +288,12 @@ class SignalRuntime:
                 min_notional=self._parameters.min_notional_usdt,
             )
         )
+        # Sizing basis is frozen BEFORE any fill so per-symbol targets are
+        # order-independent — the same rule the backtest engine uses.
+        equity_at_open = ledger.state.cash
+        for position in ledger.state.positions:
+            equity_at_open += position.quantity * open_prices[position.symbol.value]
+
         fills: list[VirtualFill] = []
         rejections: list[tuple[str, tuple[str, ...]]] = []
         pending = sorted(
@@ -291,14 +312,32 @@ class SignalRuntime:
             if stale and desired > self._executed_fractions[symbol_value]:
                 # Stale data halts new exposure; risk-reducing sells continue.
                 rejections.append((symbol_value, (STALE_DATA_HALT,)))
+                self._store.append(
+                    kind="rejection",
+                    key=f"rejection:{symbol_value}:{execution_time.isoformat()}",
+                    recorded_at=execution_time,
+                    payload={"symbol": symbol_value, "reason_codes": [STALE_DATA_HALT]},
+                )
                 continue
             order_key = (
                 f"order:{self._parameters.idempotency_namespace}"
                 f":{symbol_value}:{execution_time.date().isoformat()}"
             )
+            if self._store.has(f"fill:{order_key}"):
+                # Crash recovery: the fill happened and its checkpoint already
+                # restored both the ledger and the achieved fraction. Nothing
+                # to replay; any shortfall retries on the next cycle's key.
+                continue
             if self._store.has(order_key):
-                # A previous run already executed this ladder change today.
-                self._executed_fractions[symbol_value] = desired
+                # An attempt exists but never filled (broker rejection or a
+                # crash before the fill). Never guess the outcome: leave the
+                # executed fraction unchanged so a FRESH order retries on the
+                # next cycle's key.
+                self._append_health(
+                    execution_time,
+                    "ORDER_WITHOUT_FILL_SKIPPED",
+                    {"symbol": symbol_value, "order_key": order_key},
+                )
                 continue
             outcome = self._execute_one(
                 ledger=ledger,
@@ -312,9 +351,9 @@ class SignalRuntime:
                 execution_time=execution_time,
                 latest_market_data_at=latest_market_data_at,
                 order_key=order_key,
+                equity_at_open=equity_at_open,
             )
             if outcome is None:
-                self._executed_fractions[symbol_value] = desired
                 fills.extend(broker.fills[len(fills) :])
             else:
                 rejections.append((symbol_value, outcome))
@@ -342,15 +381,17 @@ class SignalRuntime:
         execution_time: datetime,
         latest_market_data_at: datetime,
         order_key: str,
+        equity_at_open: Decimal,
     ) -> tuple[str, ...] | None:
         parameters = self._parameters
         state = ledger.state
         budget = parameters.risk_budgets[symbol.value]
         current_position = _domain_position(state, symbol)
         delta = desired - current
-        equity_at_open = state.cash
-        for position in state.positions:
-            equity_at_open += position.quantity * open_prices[position.symbol.value]
+        # The ladder step's cash claim; costs live INSIDE it so simultaneous
+        # full-budget buys cannot starve the last symbol (fees are not an
+        # excuse to underweight whoever trades last).
+        intended_notional = abs(delta) * budget * equity_at_open
 
         if delta < Decimal("0"):
             side = OrderSide.SELL
@@ -359,21 +400,19 @@ class SignalRuntime:
                 quantity = held
             else:
                 quantity = min(
-                    _round_down(
-                        abs(delta) * budget * equity_at_open / reference_price,
-                        parameters.quantity_step,
-                    ),
+                    _round_down(intended_notional / reference_price, parameters.quantity_step),
                     held,
                 )
         else:
             side = OrderSide.BUY
             fee_rate = parameters.fee_bps / _BPS
+            cost_rate = Decimal("1") + (parameters.fee_bps + parameters.slippage_bps) / _BPS
             estimated_fill = _round_up(
                 reference_price * (Decimal("1") + parameters.slippage_bps / _BPS),
                 parameters.price_tick,
             )
             target_quantity = _round_down(
-                delta * budget * equity_at_open / reference_price,
+                intended_notional / cost_rate / reference_price,
                 parameters.quantity_step,
             )
             affordable_quantity = _round_down(
@@ -487,6 +526,17 @@ class SignalRuntime:
             result.fill,
             mark_prices={symbols[value]: open_prices[value] for value in symbols},
         )
+        # Track the fraction actually achieved: a cash-capped fill must NOT be
+        # marked as the full ladder step, or the shortfall becomes permanent.
+        actual_cost = result.fill.quantity * result.fill.price + result.fill.fee
+        if intended_notional > Decimal("0") and actual_cost < intended_notional * Decimal("0.99"):
+            achieved = current + delta * actual_cost / intended_notional
+        else:
+            achieved = desired
+        self._executed_fractions[symbol.value] = achieved
+        # The fill event doubles as a crash checkpoint: it carries the full
+        # post-fill account state so a restart between this append and the
+        # end-of-cycle snapshot can never lose the fill from the scoreboard.
         self._store.append(
             kind="fill",
             key=f"fill:{order_key}",
@@ -498,6 +548,7 @@ class SignalRuntime:
                 "price": str(result.fill.price),
                 "fee": str(result.fill.fee),
                 "slippage": str(result.fill.slippage),
+                "checkpoint": self._state_payload(),
             },
         )
         return None
@@ -552,67 +603,112 @@ class SignalRuntime:
         )
         if not newly_persisted:
             return None
-        self._channel.deliver(event)
+        # Delivery is decoupled: _flush_undelivered sends after the cycle
+        # state is safe, so a webhook outage can never corrupt the scoreboard.
         return event
+
+    def _flush_undelivered(self, now: datetime) -> tuple[NotificationEvent, ...]:
+        """Deliver every persisted-but-undelivered notification, exactly once.
+
+        A delivered-marker event records success; failures leave the marker
+        absent so the next cycle (or a same-day rerun) retries. Delivery
+        errors are logged as health events and never abort a cycle.
+        """
+
+        delivered: list[NotificationEvent] = []
+        for event in self._store.events_of_kind("notification"):
+            marker_key = f"delivered:{event.key}"
+            if self._store.has(marker_key):
+                continue
+            try:
+                notification = _notification_from_payload(event.payload)
+                self._channel.deliver(notification)
+            except Exception as exc:  # noqa: BLE001 - delivery must never kill a cycle
+                self._store.append(
+                    kind="health",
+                    key=f"health:NOTIFICATION_DELIVERY_FAILED:{event.key}:{now.date().isoformat()}",
+                    recorded_at=now,
+                    payload={
+                        "code": "NOTIFICATION_DELIVERY_FAILED",
+                        "notification": event.key,
+                        "error": type(exc).__name__,
+                    },
+                )
+                continue
+            self._store.append(
+                kind="notification_delivered",
+                key=marker_key,
+                recorded_at=now,
+                payload={"notification": event.key},
+            )
+            delivered.append(notification)
+        return tuple(delivered)
 
     # ── state persistence and restore ──────────────────────────────────
 
-    def _persist_cycle(self, close_time: datetime, decision_time: datetime) -> None:
+    def _state_payload(self) -> dict[str, object]:
+        """Full restart checkpoint: account, fractions, and cycle cursor."""
+
         ledger = self._ledger
         if ledger is None:  # pragma: no cover - guarded by callers
-            msg = "cycle cannot persist before the ledger exists"
+            msg = "state cannot persist before the ledger exists"
             raise RuntimeEngineError(msg)
         state = ledger.state
+        return {
+            "last_processed": (self._last_processed.isoformat() if self._last_processed else None),
+            "start_of_day_equity": str(self._start_of_day_equity),
+            "executed_fractions": {
+                key: str(value) for key, value in self._executed_fractions.items()
+            },
+            "decision_fractions": {
+                key: str(value) for key, value in self._decision_fractions.items()
+            },
+            "account": {
+                "account_id": state.account_id,
+                "cash": str(state.cash),
+                "realized_pnl": str(state.realized_pnl),
+                "unrealized_pnl": str(state.unrealized_pnl),
+                "equity": str(state.equity),
+                "peak_equity": str(state.peak_equity),
+                "drawdown": str(state.drawdown),
+                "updated_at": state.updated_at.isoformat(),
+                "positions": [
+                    {
+                        "symbol": position.symbol.value,
+                        "base_asset": position.symbol.base_asset,
+                        "quote_asset": position.symbol.quote_asset,
+                        "quantity": str(position.quantity),
+                        "average_entry_price": str(position.average_entry_price),
+                        "cost_basis": str(position.cost_basis),
+                    }
+                    for position in state.positions
+                ],
+            },
+        }
+
+    def _persist_cycle(self, close_time: datetime, decision_time: datetime) -> None:
         self._store.append(
             kind="cycle",
             key=f"cycle:{close_time.isoformat()}",
             recorded_at=decision_time,
             payload={
                 "close_time": close_time.isoformat(),
-                "start_of_day_equity": str(self._start_of_day_equity),
-                "executed_fractions": {
-                    key: str(value) for key, value in self._executed_fractions.items()
-                },
-                "decision_fractions": {
-                    key: str(value) for key, value in self._decision_fractions.items()
-                },
-                "account": {
-                    "account_id": state.account_id,
-                    "cash": str(state.cash),
-                    "realized_pnl": str(state.realized_pnl),
-                    "unrealized_pnl": str(state.unrealized_pnl),
-                    "equity": str(state.equity),
-                    "peak_equity": str(state.peak_equity),
-                    "drawdown": str(state.drawdown),
-                    "updated_at": state.updated_at.isoformat(),
-                    "positions": [
-                        {
-                            "symbol": position.symbol.value,
-                            "base_asset": position.symbol.base_asset,
-                            "quote_asset": position.symbol.quote_asset,
-                            "quantity": str(position.quantity),
-                            "average_entry_price": str(position.average_entry_price),
-                            "cost_basis": str(position.cost_basis),
-                        }
-                        for position in state.positions
-                    ],
-                },
+                **self._state_payload(),
             },
         )
 
     def _restore(self) -> None:
-        latest_cycle = self._store.latest_of_kind("cycle")
-        if latest_cycle is None:
+        checkpoint = self._latest_checkpoint()
+        if checkpoint is None:
             return
-        payload = latest_cycle.payload
-        close_time = datetime.fromisoformat(str(payload["close_time"]))
+        payload = checkpoint
         account = payload["account"]
         if not isinstance(account, dict):
-            msg = "cycle payload account must be an object"
+            msg = "checkpoint account must be an object"
             raise RuntimeEngineError(msg)
         positions_raw = account.get("positions", [])
         if not isinstance(positions_raw, list):
-            msg = "cycle payload positions must be a list"
+            msg = "checkpoint positions must be a list"
             raise RuntimeEngineError(msg)
         positions = tuple(
             AccountingPosition(
@@ -628,6 +724,18 @@ class SignalRuntime:
             for row in positions_raw
             if isinstance(row, dict)
         )
+        unbudgeted = [
+            position.symbol.value
+            for position in positions
+            if position.symbol.value not in self._parameters.risk_budgets
+        ]
+        if unbudgeted:
+            msg = (
+                "restored positions exist for symbols outside the configured "
+                f"risk budgets: {sorted(unbudgeted)}; restore the budget entry "
+                "or exit the position before shrinking the universe"
+            )
+            raise RuntimeEngineError(msg)
         self._ledger = VirtualAccountLedger(
             account_id=str(account["account_id"]),
             cash=Decimal(str(account["cash"])),
@@ -640,7 +748,12 @@ class SignalRuntime:
             updated_at=datetime.fromisoformat(str(account["updated_at"])),
             events=(),
         )
-        self._last_processed = close_time
+        # Cycle checkpoints written before the crash-safety upgrade carried
+        # only close_time; fall back to it so existing stores restore cleanly.
+        last_processed_raw = payload.get("last_processed") or payload.get("close_time")
+        self._last_processed = (
+            datetime.fromisoformat(str(last_processed_raw)) if last_processed_raw else None
+        )
         self._start_of_day_equity = Decimal(str(payload["start_of_day_equity"]))
         executed = payload.get("executed_fractions", {})
         decisions = payload.get("decision_fractions", {})
@@ -652,6 +765,19 @@ class SignalRuntime:
             for key, value in decisions.items():
                 if key in self._decision_fractions:
                     self._decision_fractions[key] = Decimal(str(value))
+
+    def _latest_checkpoint(self) -> dict[str, object] | None:
+        """Most recent restart checkpoint: an end-of-cycle snapshot or, if a
+        crash interrupted a cycle after fills, the last fill's checkpoint."""
+
+        for event in reversed(self._store.all_events):
+            if event.kind == "cycle":
+                return dict(event.payload)
+            if event.kind == "fill":
+                embedded = event.payload.get("checkpoint")
+                if isinstance(embedded, dict):
+                    return dict(embedded)
+        return None
 
     # ── validation helpers ─────────────────────────────────────────────
 
@@ -752,3 +878,25 @@ def _round_down(value: Decimal, step: Decimal) -> Decimal:
 def _round_up(value: Decimal, step: Decimal) -> Decimal:
     units = (value / step).to_integral_value(rounding=ROUND_CEILING)
     return units * step
+
+
+def _notification_from_payload(payload: Mapping[str, object]) -> NotificationEvent:
+    """Rebuild a persisted notification event for (re-)delivery."""
+
+    reason_codes_raw = payload["reason_codes"]
+    if not isinstance(reason_codes_raw, list):
+        msg = "persisted notification reason_codes must be a list"
+        raise RuntimeEngineError(msg)
+    return NotificationEvent(
+        notification_id=str(payload["notification_id"]),
+        symbol_value=str(payload["symbol"]),
+        action=str(payload["action"]),
+        previous_fraction=Decimal(str(payload["previous_fraction"])),
+        target_fraction=Decimal(str(payload["target_fraction"])),
+        delta_fraction=Decimal(str(payload["delta_fraction"])),
+        decision_price=Decimal(str(payload["decision_price"])),
+        decision_time=datetime.fromisoformat(str(payload["decision_time"])),
+        reason_codes=tuple(str(code) for code in reason_codes_raw),
+        risk_status=str(payload["risk_status"]),
+        created_at=datetime.fromisoformat(str(payload["created_at"])),
+    )

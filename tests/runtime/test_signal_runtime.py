@@ -223,3 +223,92 @@ def test_event_store_deduplicates_by_key(tmp_path: Path) -> None:
     latest = reloaded.latest_of_kind("order")
     assert latest is not None
     assert latest.payload == {"a": 1}
+
+
+class _FlakyChannel:
+    """Raises on the first deliveries, then succeeds — a webhook outage."""
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.delivered: list[object] = []
+
+    def deliver(self, event: object) -> None:
+        if self.failures > 0:
+            self.failures -= 1
+            msg = "simulated webhook outage"
+            raise ConnectionError(msg)
+        self.delivered.append(event)
+
+
+def test_mid_cycle_crash_after_fill_loses_nothing(tmp_path: Path) -> None:
+    """Crash between a fill append and the cycle snapshot must not eat the fill."""
+
+    reference_runtime, _ = _runtime(tmp_path / "reference.jsonl")
+    run_replay(_universe(), reference_runtime)
+    reference_store = JsonlEventStore(tmp_path / "reference.jsonl")
+
+    # Run up to and including the first fill day, then simulate a crash by
+    # truncating the store right after the LAST fill event of that day.
+    crash_store_path = tmp_path / "crash.jsonl"
+    first_runtime, _ = _runtime(crash_store_path)
+    run_replay(_universe(days=_WARMUP + 2), first_runtime)
+    lines = crash_store_path.read_text(encoding="utf-8").splitlines()
+    last_fill_index = max(index for index, line in enumerate(lines) if '"kind": "fill"' in line)
+    assert last_fill_index < len(lines) - 1, "test setup: events must follow the fill"
+    crash_store_path.write_text("\n".join(lines[: last_fill_index + 1]) + "\n", encoding="utf-8")
+
+    # Restart from the truncated store and replay the full history.
+    second_runtime, _ = _runtime(crash_store_path)
+    run_replay(_universe(), second_runtime)
+    crashed_store = JsonlEventStore(crash_store_path)
+
+    for kind in ("order", "fill", "notification", "cycle"):
+        assert crashed_store.count_of_kind(kind) == reference_store.count_of_kind(kind), kind
+    reference_cycle = reference_store.latest_of_kind("cycle")
+    crashed_cycle = crashed_store.latest_of_kind("cycle")
+    assert reference_cycle is not None
+    assert crashed_cycle is not None
+    assert reference_cycle.payload["account"] == crashed_cycle.payload["account"]
+
+
+def test_delivery_outage_never_corrupts_the_cycle_and_retries(tmp_path: Path) -> None:
+    store_path = tmp_path / "events.jsonl"
+    channel = _FlakyChannel(failures=2)
+    runtime = SignalRuntime(
+        parameters=_parameters(),
+        store=JsonlEventStore(store_path),
+        channel=channel,
+    )
+
+    summary = run_replay(_universe(), runtime)
+
+    # Every cycle processed despite the outage; the two failed deliveries were
+    # retried on later cycles, so everything persisted was delivered.
+    assert summary.cycles_processed == 11
+    store = JsonlEventStore(store_path)
+    assert store.count_of_kind("notification") == 4
+    assert store.count_of_kind("notification_delivered") == 4
+    assert len(channel.delivered) == 4
+    failures = [
+        event
+        for event in store.events_of_kind("health")
+        if event.payload.get("code") == "NOTIFICATION_DELIVERY_FAILED"
+    ]
+    assert failures
+
+
+def test_torn_final_line_is_quarantined_not_fatal(tmp_path: Path) -> None:
+    store_path = tmp_path / "events.jsonl"
+    store = JsonlEventStore(store_path)
+    recorded_at = datetime(2026, 7, 2, 0, 0, tzinfo=UTC)
+    store.append(kind="health", key="health:x", recorded_at=recorded_at, payload={"a": 1})
+    with store_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"kind": "cycle", "key": "cycle:tor')  # power-loss artifact
+
+    reloaded = JsonlEventStore(store_path)
+
+    assert reloaded.count_of_kind("health") == 1
+    assert not reloaded.has("cycle:tor")
+    assert store_path.with_suffix(".jsonl.torn").exists()
+    # The intact prefix is preserved and the store accepts appends again.
+    assert reloaded.append(kind="cycle", key="cycle:new", recorded_at=recorded_at, payload={})

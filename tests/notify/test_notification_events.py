@@ -122,3 +122,37 @@ def test_collecting_channel_records_deliveries() -> None:
 def test_webhook_channel_requires_https() -> None:
     with pytest.raises(NotificationValidationError, match="https"):
         WebhookNotificationChannel("http://insecure.example/hook")
+
+
+def test_notification_id_canonicalizes_equal_decimals() -> None:
+    padded = ladder_notification_id(
+        namespace="paper-runtime",
+        symbol_value="BTCUSDT",
+        decision_time=_DECISION_TIME,
+        previous_fraction=Decimal("0.50"),
+        target_fraction=Decimal("0.750"),
+    )
+    canonical = ladder_notification_id(
+        namespace="paper-runtime",
+        symbol_value="BTCUSDT",
+        decision_time=_DECISION_TIME,
+        previous_fraction=Decimal("0.5"),
+        target_fraction=Decimal("0.75"),
+    )
+
+    assert padded == canonical
+
+
+def test_webhook_channel_treats_http_errors_as_failed_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    def _fake_post(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(400, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    channel = WebhookNotificationChannel("https://hook.example/x")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        channel.deliver(_event())

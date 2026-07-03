@@ -5,7 +5,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,6 +30,7 @@ from src.domain import Candle, Timeframe
 from src.notify import (
     CollectingNotificationChannel,
     NotificationChannel,
+    NotificationValidationError,
     WebhookNotificationChannel,
 )
 from src.runtime import (
@@ -39,6 +44,8 @@ from src.runtime import (
 
 # 200-close warmup plus margin; Binance caps one request at 1000 anyway.
 _LIVE_FETCH_LIMIT = 210
+# A lock older than this is treated as a crash leftover, not a live run.
+_LOCK_STALE_SECONDS = 2 * 60 * 60
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,15 +94,27 @@ def main() -> None:
 
     config = load_config(Path(args.config))
     store_path = Path(args.store or config.storage.runtime_events_path)
+    live_store_path = Path(config.storage.runtime_events_path)
+    if args.replay_smoke and store_path.resolve() == live_store_path.resolve():
+        # A replay against the live store would poison the gate's paper-day
+        # counter with historical cycles. Replays must name their own store.
+        print(
+            "refusing: --replay-smoke must not target the live runtime store "
+            f"({live_store_path}); pass an explicit --store path",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     channel = _channel_from_config(config.notifications.channel, config.notifications.webhook_url)
     runtime = SignalRuntime(
         parameters=_runtime_parameters(config),
-        store=JsonlEventStore(store_path),
+        store=JsonlEventStore(store_path, durable_fsync=args.once),
         channel=channel,
     )
 
     if args.once:
-        _run_live_cycle(config, runtime, store_path)
+        with _single_instance_lock(store_path):
+            _run_live_cycle(config, runtime, store_path)
         return
 
     candles_dir = Path(args.candles_dir or config.storage.candle_files_directory)
@@ -217,6 +236,34 @@ def _channel_from_config(channel: str, webhook_url: str) -> NotificationChannel:
     return CollectingNotificationChannel()
 
 
+@contextmanager
+def _single_instance_lock(store_path: Path) -> Iterator[None]:
+    """Prevent overlapping live cycles (scheduled task + manual run)."""
+
+    lock_path = store_path.with_suffix(store_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        age_seconds = time.time() - lock_path.stat().st_mtime
+        if age_seconds < _LOCK_STALE_SECONDS:
+            print(
+                f"another live cycle appears to be running (lock {lock_path}, "
+                f"age {int(age_seconds)}s); exiting without side effects",
+                file=sys.stderr,
+            )
+            raise SystemExit(0) from None
+        # A crash left a stale lock behind; replace it and continue.
+        lock_path.unlink()
+        handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        os.write(handle, str(os.getpid()).encode("ascii"))
+        os.close(handle)
+        yield
+    finally:
+        lock_path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     try:
         main()
@@ -225,6 +272,7 @@ if __name__ == "__main__":
         RuntimeStoreError,
         MarketDataError,
         MarketDataValidationError,
+        NotificationValidationError,
         httpx.HTTPError,
     ) as exc:
         print(json.dumps({"error": type(exc).__name__, "detail": str(exc)}), file=sys.stderr)

@@ -137,8 +137,10 @@ explicitly marked `pytest.mark.network`.
 - Every notification carries: symbol, action (increase/decrease ladder step), tranche
   size (fraction of the asset's risk budget), reason codes, decision price, decision
   timestamp (UTC daily close), and current risk status.
-- Notifications are persisted before delivery and deduplicated by idempotency key:
-  a runtime restart must never re-send an already-persisted notification.
+- Notifications are persisted before delivery and deduplicated by idempotency
+  key; delivery success is recorded as a delivered-marker event. A restart must
+  never re-send an already-DELIVERED notification; a persisted-but-undelivered
+  one (channel outage) is retried until a marker exists.
 - Expected cadence per asset is a handful of notifications per year
   (inference: roughly 4-15). Long silent stretches are correct behavior, not a bug.
 
@@ -258,7 +260,7 @@ is worthless by construction.
   The registry maintains the running trial count N. Runs outside the registry
   are void and must not be cited.
 - Validation tooling:
-  - CSCV implementation (S=16 blocks, C(16,8)=12,780 splits) producing PBO.
+  - CSCV implementation (S=16 blocks, C(16,8)=12,870 splits) producing PBO.
   - DSR computation (skewness, kurtosis, T, variance of trial Sharpes, effective N).
   - Holdout ledger: the most recent ~12 months are locked at first backtest;
     unlocking is a single-use, logged, irreversible event.
@@ -307,9 +309,13 @@ notifies the user, and keeps the scoreboard honest.
   signals, targets, risk decisions, notifications, virtual orders/fills,
   account snapshots, health events.
 - Restart safety: idempotency keys make both notifications and virtual orders
-  duplicate-proof across restarts.
+  duplicate-proof across restarts; every fill embeds a state checkpoint so a
+  crash BETWEEN a fill and the end-of-cycle snapshot can never lose the fill.
 - Stale data: halt new exposure increases; risk-reducing exits remain allowed;
-  emit a stale-data status notification.
+  record stale-halt rejections and a stale health event (dashboard-visible).
+- Missed days: a skipped calendar day means a skipped decision; the next cycle
+  records a MISSED_DAYS health event and executes any pending ladder change at
+  the latest candle's open (an honest gap, not a silent backfill).
 
 ### Done When
 

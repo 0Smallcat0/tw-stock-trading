@@ -36,4 +36,6 @@ class WebhookNotificationChannel:
         self._timeout_seconds = timeout_seconds
 
     def deliver(self, event: NotificationEvent) -> None:
-        httpx.post(self._url, json=event.to_json_dict(), timeout=self._timeout_seconds)
+        response = httpx.post(self._url, json=event.to_json_dict(), timeout=self._timeout_seconds)
+        # A 4xx/5xx response is a failed delivery, not a delivered one.
+        response.raise_for_status()

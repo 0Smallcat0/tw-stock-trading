@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.backtest import (
+    BacktestError,
     BacktestParameters,
     HoldoutViolationError,
     ValidationInputError,
@@ -298,3 +299,92 @@ def test_holdout_spend_run_is_single_use_and_marked_in_registry(tmp_path: Path) 
             recorded_at=_NOW + timedelta(hours=2),
             spend_holdout_single_use=True,
         )
+
+
+def test_non_annualized_sharpe_variance_deannualizes_registry_values() -> None:
+    from src.backtest import non_annualized_sharpe_variance
+
+    annualized = [1.02, 0.96, -0.37]
+    variance = non_annualized_sharpe_variance(annualized)
+
+    import statistics
+
+    assert variance == pytest.approx(statistics.pvariance(annualized) / 365)
+    assert non_annualized_sharpe_variance([1.0]) == 0.0
+
+
+def test_dsr_raises_instead_of_fabricating_certainty_on_extreme_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With population moments the Mertens term is bounded below by
+    # (1 - skew*SR/2)^2 >= 0, so a breakdown needs a broken estimator; the
+    # guard is defense-in-depth and must raise rather than clamp silently.
+    from src.backtest import validation
+
+    monkeypatch.setattr(validation, "_kurtosis", lambda _values: 0.0)
+    with pytest.raises(ValidationInputError, match="Mertens"):
+        deflated_sharpe_ratio(
+            [0.02, 0.019, 0.021, 0.02, 0.018, 0.022] * 10,
+            trial_sharpe_variance=0.0,
+            effective_trials=1,
+        )
+
+
+def test_future_dated_candles_cannot_anchor_the_holdout(tmp_path: Path) -> None:
+    universe = _flat_universe(620)
+    with pytest.raises(BacktestError, match="future-dated"):
+        run_registered_backtest(
+            universe,
+            parameters=_parameters(),
+            config_hash="hash-a",
+            code_version="abc1234",
+            registry_path=tmp_path / "registry.jsonl",
+            holdout_path=tmp_path / "holdout.json",
+            reports_directory=tmp_path / "reports",
+            # recorded_at BEFORE the data ends: the data is "from the future".
+            recorded_at=_BASE_OPEN_TIME + timedelta(days=100),
+        )
+
+
+def test_registered_run_persists_a_durable_returns_series(tmp_path: Path) -> None:
+    import json as json_module
+
+    universe = _flat_universe(620)
+    registry_path = tmp_path / "registry.jsonl"
+    result = run_registered_backtest(
+        universe,
+        parameters=_parameters(),
+        config_hash="hash-a",
+        code_version="abc1234",
+        registry_path=registry_path,
+        holdout_path=tmp_path / "holdout.json",
+        reports_directory=tmp_path / "reports",
+        recorded_at=_NOW,
+    )
+
+    returns_path = tmp_path / "trial_returns" / f"trial-{result.trial.trial_id:06d}.json"
+    assert returns_path.exists()
+    payload = json_module.loads(returns_path.read_text(encoding="utf-8"))
+    assert payload["trial_id"] == result.trial.trial_id
+    assert len(payload["daily_returns"]) == result.report.metrics.observation_days - 1
+
+
+def test_holdout_spend_registers_isolated_holdout_segment_metrics(tmp_path: Path) -> None:
+    universe = _flat_universe(620)
+    qualification = run_registered_backtest(
+        universe,
+        parameters=_parameters(),
+        config_hash="hash-a",
+        code_version="abc1234",
+        registry_path=tmp_path / "registry.jsonl",
+        holdout_path=tmp_path / "holdout.json",
+        reports_directory=tmp_path / "reports",
+        recorded_at=_NOW,
+        spend_holdout_single_use=True,
+    )
+
+    metrics = qualification.trial.metrics
+    assert "holdout_observation_days" in metrics
+    assert int(metrics["holdout_observation_days"]) > 300
+    assert "holdout_annualized_sharpe" in metrics
+    assert "holdout_max_drawdown_fraction" in metrics

@@ -100,12 +100,16 @@ def deflated_sharpe_ratio(
 
     skewness = _skewness(returns)
     kurtosis = _kurtosis(returns)
-    denominator = math.sqrt(
-        max(
-            1.0 - skewness * observed_sharpe + (kurtosis - 1.0) / 4.0 * observed_sharpe**2,
-            1e-12,
+    mertens_term = 1.0 - skewness * observed_sharpe + (kurtosis - 1.0) / 4.0 * observed_sharpe**2
+    if mertens_term <= 0.0:
+        # Fabricating certainty by clamping would answer 0.0/1.0 confidently
+        # on inputs where the variance approximation has broken down.
+        msg = (
+            "returns are too extreme or too short for a stable DSR estimate "
+            f"(Mertens variance term {mertens_term:.6f} <= 0)"
         )
-    )
+        raise ValidationInputError(msg)
+    denominator = math.sqrt(mertens_term)
     statistic = (
         (observed_sharpe - expected_max_sharpe) * math.sqrt(observations - 1.0)
     ) / denominator
@@ -130,6 +134,11 @@ def probability_of_backtest_overfitting(
     Splits the rows into ``block_count`` contiguous equal blocks, evaluates all
     C(S, S/2) symmetric train/test partitions, and returns the fraction where
     the in-sample-best configuration ranks in the bottom half out-of-sample.
+
+    Rows beyond the largest multiple of ``block_count`` — the MOST RECENT
+    ``T mod S`` observations — are dropped to keep blocks equal; compare
+    ``result.observations`` against ``len(performance_matrix)`` to see how
+    many were excluded.
     """
 
     if block_count < 2 or block_count % 2 != 0:
@@ -194,9 +203,26 @@ def _column_sharpe(rows: list[list[float]], column: int) -> float:
     return statistics.fmean(values) / stdev
 
 
+def non_annualized_sharpe_variance(
+    annualized_sharpes: list[float], *, periods_per_year: int = 365
+) -> float:
+    """De-annualize registry Sharpe values into the variance DSR expects.
+
+    The trial registry stores ANNUALIZED Sharpe ratios; feeding their variance
+    into deflated_sharpe_ratio() unconverted inflates the expected-max Sharpe
+    by periods_per_year and false-rejects everything. Var(SR_ann / sqrt(p))
+    equals Var(SR_ann) / p.
+    """
+
+    if len(annualized_sharpes) < 2:
+        return 0.0
+    return statistics.pvariance(annualized_sharpes) / periods_per_year
+
+
 def _skewness(values: list[float]) -> float:
+    # Population moments (ddof=0), matching the paper's gamma_3/gamma_4.
     mean = statistics.fmean(values)
-    stdev = statistics.stdev(values)
+    stdev = statistics.pstdev(values)
     if stdev == 0.0:
         return 0.0
     count = len(values)
@@ -205,7 +231,7 @@ def _skewness(values: list[float]) -> float:
 
 def _kurtosis(values: list[float]) -> float:
     mean = statistics.fmean(values)
-    stdev = statistics.stdev(values)
+    stdev = statistics.pstdev(values)
     if stdev == 0.0:
         return 3.0
     count = len(values)

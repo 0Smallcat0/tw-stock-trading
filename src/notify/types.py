@@ -31,11 +31,16 @@ def ladder_notification_id(
     previous_fraction: Decimal,
     target_fraction: Decimal,
 ) -> str:
-    """Deterministic idempotency key: a restart can never re-send this event."""
+    """Deterministic idempotency key: a restart can never re-send this event.
 
+    Fractions are canonicalized so numerically equal Decimals (0.50 vs 0.5)
+    can never mint two different keys for one transition.
+    """
+
+    previous = format(previous_fraction.normalize(), "f")
+    target = format(target_fraction.normalize(), "f")
     return (
-        f"notify:{namespace}:{symbol_value}:{decision_time.date().isoformat()}"
-        f":{previous_fraction}->{target_fraction}"
+        f"notify:{namespace}:{symbol_value}:{decision_time.date().isoformat()}:{previous}->{target}"
     )
 
 
