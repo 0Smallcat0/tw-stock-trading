@@ -7,6 +7,7 @@ private data anywhere in this process — permanently, by product definition.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -141,9 +142,18 @@ def create_dashboard_app(
 
     @app.get("/api/gate")
     def gate() -> dict[str, Any]:
+        store = _store()
+        cycles = store.events_of_kind("cycle")
+        paper_started = cycles[0].recorded_at if cycles else None
+        paper_days = (datetime.now(UTC) - paper_started).days if paper_started is not None else 0
         return {
             "registered_trials_n": _count_jsonl_lines(trial_registry_path),
             "holdout": _read_json_or_none(holdout_lock_path),
+            "paper_trading": {
+                "started": paper_started.isoformat() if paper_started else None,
+                "days": paper_days,
+                "cycles": len(cycles),
+            },
             "thresholds": {
                 "pbo_max": "0.05",
                 "dsr_min": "0.95",

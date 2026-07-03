@@ -176,6 +176,9 @@ def test_notifications_rejections_and_gate_views(tmp_path: Path) -> None:
     assert gate["registered_trials_n"] == 2
     assert gate["holdout"]["spent"] is False
     assert gate["thresholds"]["pbo_max"] == "0.05"
+    assert gate["paper_trading"]["cycles"] == 1
+    assert gate["paper_trading"]["started"] is not None
+    assert gate["paper_trading"]["days"] >= 0
 
 
 def test_empty_store_yields_graceful_defaults(tmp_path: Path) -> None:
