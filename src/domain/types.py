@@ -3,9 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
+
+# Taiwan has observed no daylight saving time since 1980, so a fixed UTC+8
+# offset is exact for all data this system touches (1994+). A fixed offset
+# also removes the Windows IANA-tzdata dependency.
+TAIPEI_TZ = timezone(timedelta(hours=8), name="Asia/Taipei")
+
+
+def taipei_date(value: datetime) -> date:
+    """Return the Taipei calendar date of a timezone-aware timestamp."""
+
+    if value.tzinfo is None:
+        msg = "taipei_date requires a timezone-aware datetime"
+        raise DomainValidationError(msg)
+    return value.astimezone(TAIPEI_TZ).date()
+
 
 type Money = Decimal
 type Price = Decimal
@@ -114,7 +129,12 @@ class Timeframe:
 
 @dataclass(frozen=True, slots=True)
 class Candle:
-    """Closed or open OHLCV market candle."""
+    """Closed or open OHLCV market candle.
+
+    ``trading_date`` is the exchange-local (Taipei) session date. It is
+    optional metadata: when present it must match ``open_time`` converted to
+    Taipei time, so the two representations can never disagree.
+    """
 
     symbol: Symbol
     timeframe: Timeframe
@@ -126,6 +146,7 @@ class Candle:
     close_price: Price
     volume: Quantity
     is_closed: bool
+    trading_date: date | None = None
 
     def __post_init__(self) -> None:
         _require_utc_datetime("open_time", self.open_time)
@@ -138,6 +159,9 @@ class Candle:
         _require_positive_decimal("low_price", self.low_price)
         _require_positive_decimal("close_price", self.close_price)
         _require_non_negative_decimal("volume", self.volume)
+        if self.trading_date is not None and self.trading_date != taipei_date(self.open_time):
+            msg = "trading_date must match open_time in Taipei time"
+            raise DomainValidationError(msg)
 
 
 @dataclass(frozen=True, slots=True)

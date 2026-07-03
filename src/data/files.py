@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -48,7 +48,7 @@ def write_candles_jsonl(candles: tuple[Candle, ...], path: str | Path) -> Path:
     file_path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     for candle in sorted(candles, key=lambda item: item.open_time):
-        row = {
+        row: dict[str, object] = {
             "symbol": candle.symbol.value,
             "base_asset": candle.symbol.base_asset,
             "quote_asset": candle.symbol.quote_asset,
@@ -62,6 +62,8 @@ def write_candles_jsonl(candles: tuple[Candle, ...], path: str | Path) -> Path:
             "volume": str(candle.volume),
             "is_closed": candle.is_closed,
         }
+        if candle.trading_date is not None:
+            row["trading_date"] = candle.trading_date.isoformat()
         lines.append(json.dumps(row, sort_keys=True))
     file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return file_path
@@ -88,6 +90,7 @@ def read_candles_jsonl(path: str | Path) -> tuple[Candle, ...]:
             msg = f"{file_path}:{line_number} is missing required candle fields"
             raise MarketDataValidationError(msg)
         try:
+            raw_trading_date = row.get("trading_date")
             candle = Candle(
                 symbol=Symbol(
                     value=str(row["symbol"]),
@@ -103,6 +106,11 @@ def read_candles_jsonl(path: str | Path) -> tuple[Candle, ...]:
                 close_price=Decimal(str(row["close"])),
                 volume=Decimal(str(row["volume"])),
                 is_closed=bool(row["is_closed"]),
+                trading_date=(
+                    date.fromisoformat(str(raw_trading_date))
+                    if raw_trading_date is not None
+                    else None
+                ),
             )
         except (DomainValidationError, InvalidOperation, ValueError) as exc:
             msg = f"{file_path}:{line_number} is not a valid candle row: {exc}"

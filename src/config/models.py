@@ -401,6 +401,7 @@ class StorageConfig(CoreConfigModel):
     database: str = "tw_quant"
     username: str = "tw"
     password: str = "tw_dev_only"
+    calendar_schedule_directory: str = "data/calendar"
     snapshot_directory: str = "docs/reports/config-snapshots"
     trial_registry_path: str = "docs/reports/research/trial_registry.jsonl"
     holdout_lock_path: str = "docs/reports/research/holdout_lock.json"
@@ -413,6 +414,7 @@ class StorageConfig(CoreConfigModel):
         "database",
         "username",
         "password",
+        "calendar_schedule_directory",
         "snapshot_directory",
         "trial_registry_path",
         "holdout_lock_path",
