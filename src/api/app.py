@@ -14,7 +14,11 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 from src.api.page import DASHBOARD_HTML
-from src.runtime import JsonlEventStore
+
+# Import the store submodule directly: pulling in the src.runtime package
+# facade would drag the whole engine (and its business-package imports) into
+# the API's dependency graph, breaking the read-only presentation contract.
+from src.runtime.store import JsonlEventStore
 
 
 def create_dashboard_app(
