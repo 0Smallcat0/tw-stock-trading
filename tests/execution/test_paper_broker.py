@@ -39,19 +39,21 @@ def _now() -> datetime:
 
 
 def _symbol() -> Symbol:
-    return Symbol(value="BTCUSDT", base_asset="BTC", quote_asset="USDT")
+    return Symbol(value="0050", base_asset="0050", quote_asset="TWD")
 
 
-def _eth_symbol() -> Symbol:
-    return Symbol(value="ETHUSDT", base_asset="ETH", quote_asset="USDT")
+def _second_symbol() -> Symbol:
+    return Symbol(value="0056", base_asset="0056", quote_asset="TWD")
 
 
 def _parameters(**overrides: object) -> PaperBrokerParameters:
     values = {
-        "fee_bps": Decimal("10"),
+        "commission_bps": Decimal("10"),
+        "min_fee": Decimal("0"),
+        "sell_tax_bps_etf": Decimal("0"),
+        "sell_tax_bps_stock": Decimal("0"),
         "slippage_bps": Decimal("5"),
         "quantity_step": Decimal("0.000001"),
-        "price_tick": Decimal("0.01"),
         "min_notional": Decimal("10"),
         "real_orders_enabled": False,
         "private_api_enabled": False,
@@ -242,12 +244,13 @@ def test_market_price_must_be_positive() -> None:
         PaperMarketPrice(symbol=_symbol(), price=Decimal("0"), observed_at=_now())
 
 
-def test_public_market_price_must_respect_price_tick() -> None:
-    broker = PaperBroker(_parameters(price_tick=Decimal("0.01")))
+def test_public_market_price_must_respect_bracket_tick() -> None:
+    # 0050 is an ETF; at price >= NT$50 the bracket tick is 0.05.
+    broker = PaperBroker(_parameters())
 
     result = broker.submit_order(
         _virtual_order(),
-        market_price=_market_price(price=Decimal("50000.005")),
+        market_price=_market_price(price=Decimal("50000.03")),
         account_view=_account_view(),
         submitted_at=_now(),
     )
@@ -300,7 +303,7 @@ def test_symbol_mismatch_is_rejected() -> None:
     result = broker.submit_order(
         _virtual_order(),
         market_price=PaperMarketPrice(
-            symbol=_eth_symbol(),
+            symbol=_second_symbol(),
             price=Decimal("3000.00"),
             observed_at=_now(),
         ),

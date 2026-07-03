@@ -298,25 +298,33 @@ costs, TW risk triggers, dividend-aware accounting.
 
 ### Build
 
-- Features/strategy: adjusted-close input wiring (math unchanged;
-  contract-fixed lookbacks).
-- Portfolio: weight→shares with odd-lot granularity (`quantity_mode`).
-- Risk: disaster dual trigger (single-day -9% / 3-session -15%), staleness
-  in trading days, LIMIT_DAY flagging, TW instrument rules (tick table,
-  lot granularity) replacing exchange-filter payloads.
+- Portfolio sizing: odd-lot share granularity via `quantity_step` = 1
+  (board-lot mode = 1000; a separate `quantity_mode` proved redundant).
+- Risk: disaster dual trigger (single-day -9% / 3-session -15%) wired into
+  both engines; LIMIT_DAY open annotation (±10% territory vs prior close);
+  the gate consumes `market_data_is_stale` as a CALLER-PROVIDED fact
+  (src.risk cannot import the calendar; the engines' trading-day staleness
+  computation lands with their calendar wiring in TW-E/TW-F — until then
+  they keep the interim wall-clock rule).
 - Execution: full TW cost model — commission ceiling × discount with min
-  fee, sell-only tax by instrument type (ETF 10bps / stock 30bps), bracketed
-  tick rounding, slippage.
-- Accounting: DIVIDEND_ACCRUED (ex-date, counts in equity) /
-  DIVIDEND_PAID (pay date) / SPLIT_ADJUST (quantity ×ratio, avg cost ÷ratio,
-  equity invariant); optional NHI 2.11% withholding flag (default off).
-- Tests: limit-down week disaster trigger, dividend three-event lifecycle,
-  min-fee erosion, split equity invariance, LNY staleness non-event.
+  fee, sell-only tax by instrument type (ETF 10bps / stock 30bps;
+  `VirtualFill` itemizes `tax` separately), price-bracketed tick tables
+  resolved dynamically (never configured), slippage. Cost-stress reruns
+  scale commission+slippage only — the tax is statutory.
+- Accounting: DIVIDEND_ACCRUED (ex-date receivable, counts in equity) /
+  DIVIDEND_PAID (pay date, NHI withholding recorded as tax) /
+  SPLIT_ADJUSTED (whole-share multiplier snapped from official prices,
+  equity invariant); `nhi_withholding_for` helper (default off).
+- Adjusted-close input wiring for features happens where series are LOADED
+  (TW-E backtest / TW-F runtime): the strategy math is input-agnostic by
+  design and unchanged.
+- Tests: tick brackets, min-fee floor, sell-tax by instrument, buy-tax
+  domain rule, dividend three-event lifecycle incl. NHI, split equity
+  invariance, multi-session disaster (2025-04 shape), limit-day detection.
 
 ### Done When
 
-- deterministic decisions on adjusted series; fills/fees/taxes itemized and
-  auditable per event
+- fills/fees/taxes itemized and auditable per ledger event
 - all TW risk triggers proven by tests
 - baseline verification passes
 

@@ -92,7 +92,6 @@ def _parameters(
 ) -> RiskGateParameters:
     return RiskGateParameters(
         min_notional_twd=min_notional_twd,
-        stale_data_max_age_seconds=120,
         max_drawdown_fraction=max_drawdown_fraction,
         daily_loss_pause_fraction=daily_loss_pause_fraction,
     )
@@ -143,6 +142,7 @@ def _context(
     earliest_execution_time: datetime | None | object = _UNSET,
     exchange_filters: RiskExchangeFilters | None | object = _UNSET,
     risk_state: RiskState | None | object = _UNSET,
+    market_data_is_stale: bool = False,
 ) -> RiskGateContext:
     return RiskGateContext(
         current_position=current_position,
@@ -155,6 +155,7 @@ def _context(
         else earliest_execution_time,
         exchange_filters=_filters() if exchange_filters is _UNSET else exchange_filters,
         risk_state=_risk_state() if risk_state is _UNSET else risk_state,
+        market_data_is_stale=market_data_is_stale,
     )
 
 
@@ -352,7 +353,7 @@ def test_exchange_minimum_notional_violation_is_rejected() -> None:
 def test_stale_data_pauses_new_buy() -> None:
     decision = _evaluate(
         _intent(),
-        context=_context(latest_market_data_at=_now() - timedelta(minutes=3)),
+        context=_context(market_data_is_stale=True),
     )
 
     assert decision.status is RiskDecisionStatus.PAUSED
@@ -419,7 +420,7 @@ def test_trailing_stop_pauses_new_buy() -> None:
     [
         _context(
             current_position=_position(),
-            latest_market_data_at=_now() - timedelta(minutes=3),
+            market_data_is_stale=True,
         ),
         _context(
             current_position=_position(),
@@ -474,7 +475,7 @@ def test_reason_codes_are_deterministically_ordered() -> None:
         _intent(side=OrderSide.SELL, created_at=_now(), quantity=Decimal("0.0002")),
         context=_context(
             current_position=None,
-            latest_market_data_at=_now() - timedelta(minutes=3),
+            market_data_is_stale=True,
             earliest_execution_time=_now() + timedelta(milliseconds=1),
             exchange_filters=None,
         ),
@@ -509,7 +510,7 @@ def test_hard_rejection_has_status_precedence_over_pause() -> None:
     decision = _evaluate(
         _intent(created_at=_now()),
         context=_context(
-            latest_market_data_at=_now() - timedelta(minutes=3),
+            market_data_is_stale=True,
             earliest_execution_time=_now() + timedelta(milliseconds=1),
         ),
     )

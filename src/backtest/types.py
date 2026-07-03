@@ -24,14 +24,18 @@ class BacktestParameters:
     risk_budgets: Mapping[str, Decimal]
     initial_cash: Decimal
     account_id: str
-    fee_bps: Decimal
+    commission_bps: Decimal
+    min_fee: Decimal
+    sell_tax_bps_etf: Decimal
+    sell_tax_bps_stock: Decimal
     slippage_bps: Decimal
     quantity_step: Decimal
-    price_tick: Decimal
     min_notional_twd: Decimal
     max_drawdown_fraction: Decimal
     daily_loss_pause_fraction: Decimal
     disaster_single_day_drop_fraction: Decimal
+    disaster_multi_session_count: int
+    disaster_multi_session_drop_fraction: Decimal
     stale_data_max_age_seconds: int
     cost_multiplier: Decimal = Decimal("1")
 
@@ -54,10 +58,14 @@ class BacktestParameters:
         object.__setattr__(self, "risk_budgets", MappingProxyType(dict(self.risk_budgets)))
 
     @property
-    def effective_fee_bps(self) -> Decimal:
-        """Fee bps after the cost-stress multiplier."""
+    def effective_commission_bps(self) -> Decimal:
+        """Commission bps after the cost-stress multiplier.
 
-        return self.fee_bps * self.cost_multiplier
+        The stress multiplier scales commission and slippage only: the
+        securities transaction tax is statutory, not an assumption to stress.
+        """
+
+        return self.commission_bps * self.cost_multiplier
 
     @property
     def effective_slippage_bps(self) -> Decimal:

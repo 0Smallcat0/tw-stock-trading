@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 
 from src.domain import OrderIntent, OrderSide, RiskDecision, RiskDecisionStatus
@@ -219,12 +218,7 @@ def _check_pauses(
     parameters: RiskGateParameters,
     reason_codes: list[str],
 ) -> None:
-    if (
-        context.latest_market_data_at is not None
-        and context.decision_time is not None
-        and context.decision_time - context.latest_market_data_at
-        > timedelta(seconds=parameters.stale_data_max_age_seconds)
-    ):
+    if context.market_data_is_stale:
         reason_codes.append(STALE_DATA)
 
     if context.account_snapshot is None or context.risk_state is None:

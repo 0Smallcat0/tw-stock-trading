@@ -31,12 +31,22 @@ BROKER_REJECTED_INSUFFICIENT_HOLDINGS = "BROKER_REJECTED_INSUFFICIENT_HOLDINGS"
 
 @dataclass(frozen=True, slots=True)
 class PaperBrokerParameters:
-    """Caller-adapted paper execution parameters."""
+    """Caller-adapted paper execution parameters (TW cost model).
 
-    fee_bps: Decimal
+    ``commission_bps`` is the EFFECTIVE per-side brokerage rate (statutory
+    ceiling × broker discount, computed at config time), floored per order by
+    ``min_fee``. The securities transaction tax applies to SELLS only and
+    depends on the instrument type (ETF 10bps / stock 30bps). Tick sizes are
+    price-dependent brackets resolved by ``src.execution.ticks``, never a
+    static parameter.
+    """
+
+    commission_bps: Decimal
+    min_fee: Decimal
+    sell_tax_bps_etf: Decimal
+    sell_tax_bps_stock: Decimal
     slippage_bps: Decimal
     quantity_step: Decimal
-    price_tick: Decimal
     min_notional: Decimal
     real_orders_enabled: bool = False
     private_api_enabled: bool = False
@@ -44,15 +54,27 @@ class PaperBrokerParameters:
     leverage_enabled: bool = False
 
     def __post_init__(self) -> None:
-        _require_non_negative_decimal("fee_bps", self.fee_bps)
+        _require_non_negative_decimal("commission_bps", self.commission_bps)
+        _require_non_negative_decimal("min_fee", self.min_fee)
+        _require_non_negative_decimal("sell_tax_bps_etf", self.sell_tax_bps_etf)
+        _require_non_negative_decimal("sell_tax_bps_stock", self.sell_tax_bps_stock)
         _require_non_negative_decimal("slippage_bps", self.slippage_bps)
         _require_positive_decimal("quantity_step", self.quantity_step)
-        _require_positive_decimal("price_tick", self.price_tick)
         _require_positive_decimal("min_notional", self.min_notional)
         _require_bool("real_orders_enabled", self.real_orders_enabled)
         _require_bool("private_api_enabled", self.private_api_enabled)
         _require_bool("margin_enabled", self.margin_enabled)
         _require_bool("leverage_enabled", self.leverage_enabled)
+
+    def sell_tax_bps_for(self, instrument_type: str) -> Decimal:
+        """Sell-side securities-transaction-tax rate for an instrument type."""
+
+        if instrument_type == "etf":
+            return self.sell_tax_bps_etf
+        if instrument_type == "stock":
+            return self.sell_tax_bps_stock
+        msg = f"unknown instrument type: {instrument_type!r}"
+        raise PaperBrokerError(msg)
 
 
 @dataclass(frozen=True, slots=True)

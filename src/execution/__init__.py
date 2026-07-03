@@ -1,6 +1,7 @@
 """Paper execution package for Core MVP virtual fills."""
 
 from src.execution.broker import PaperBroker
+from src.execution.ticks import InstrumentType, tw_instrument_type, tw_tick_for
 from src.execution.types import (
     BROKER_APPROVED,
     BROKER_REJECTED_INSUFFICIENT_CASH,
@@ -41,6 +42,7 @@ __all__ = [
     "BROKER_REJECTED_SYMBOL_MISMATCH",
     "BROKER_REJECTED_ZERO_QUANTITY_AFTER_ROUNDING",
     "BrokerAcceptedOrder",
+    "InstrumentType",
     "BrokerAccountView",
     "BrokerRejectedOrder",
     "PaperBroker",
@@ -48,4 +50,6 @@ __all__ = [
     "PaperBrokerParameters",
     "PaperBrokerResult",
     "PaperMarketPrice",
+    "tw_instrument_type",
+    "tw_tick_for",
 ]

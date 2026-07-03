@@ -35,6 +35,8 @@ from src.execution import (
     PaperBroker,
     PaperBrokerParameters,
     PaperMarketPrice,
+    tw_instrument_type,
+    tw_tick_for,
 )
 from src.features import FeatureSnapshot, build_daily_trend_snapshots
 from src.portfolio import LadderPortfolioParameters, build_ladder_targets
@@ -46,6 +48,8 @@ from src.risk import (
     RiskGateContext,
     RiskGateParameters,
     RiskState,
+    detect_limit_day_open,
+    detect_multi_session_disaster,
     detect_single_day_disaster,
     evaluate_order_intent,
 )
@@ -100,16 +104,17 @@ def run_backtest(
     )
     broker = PaperBroker(
         PaperBrokerParameters(
-            fee_bps=parameters.effective_fee_bps,
+            commission_bps=parameters.effective_commission_bps,
+            min_fee=parameters.min_fee,
+            sell_tax_bps_etf=parameters.sell_tax_bps_etf,
+            sell_tax_bps_stock=parameters.sell_tax_bps_stock,
             slippage_bps=parameters.effective_slippage_bps,
             quantity_step=parameters.quantity_step,
-            price_tick=parameters.price_tick,
             min_notional=parameters.min_notional_twd,
         )
     )
     gate_parameters = RiskGateParameters(
         min_notional_twd=parameters.min_notional_twd,
-        stale_data_max_age_seconds=parameters.stale_data_max_age_seconds,
         max_drawdown_fraction=parameters.max_drawdown_fraction,
         daily_loss_pause_fraction=parameters.daily_loss_pause_fraction,
     )
@@ -144,14 +149,14 @@ def run_backtest(
                     reason_codes=decision.reason_codes,
                 )
             )
-            risk_event = _disaster_event_for(
-                candles_by_symbol[symbol_value],
-                candle_lookup[symbol_value][decision_time],
-                symbols[symbol_value],
-                parameters.disaster_single_day_drop_fraction,
+            risk_events.extend(
+                _risk_events_for(
+                    candles_by_symbol[symbol_value],
+                    candle_lookup[symbol_value][decision_time],
+                    symbols[symbol_value],
+                    parameters,
+                )
             )
-            if risk_event is not None:
-                risk_events.append(risk_event)
 
         target_set = build_ladder_targets(
             tuple(decisions[symbol_value] for symbol_value in sorted(symbols)),
@@ -260,7 +265,10 @@ def run_backtest(
         equity_curve=tuple(equity_curve),
         metrics=metrics,
         cost_assumptions={
-            "fee_bps": str(parameters.effective_fee_bps),
+            "commission_bps": str(parameters.effective_commission_bps),
+            "min_fee": str(parameters.min_fee),
+            "sell_tax_bps_etf": str(parameters.sell_tax_bps_etf),
+            "sell_tax_bps_stock": str(parameters.sell_tax_bps_stock),
             "slippage_bps": str(parameters.effective_slippage_bps),
             "cost_multiplier": str(parameters.cost_multiplier),
             "fill_rule": "next_bar_open",
@@ -318,15 +326,17 @@ def _execute_ladder_change(
     else:
         side = OrderSide.BUY
         # Mirror the broker's cost math exactly (slippage then tick round-up,
-        # fee on the gross fill notional) so an affordable-sized buy can never
-        # bounce off the broker's cash check by a rounding hair.
-        fee_rate = parameters.effective_fee_bps / _BPS
+        # commission on the gross fill notional; buys carry no sell tax) so an
+        # affordable-sized buy can never bounce off the broker's cash check by
+        # a rounding hair.
+        fee_rate = parameters.effective_commission_bps / _BPS
         cost_rate = (
-            Decimal("1") + (parameters.effective_fee_bps + parameters.effective_slippage_bps) / _BPS
+            Decimal("1")
+            + (parameters.effective_commission_bps + parameters.effective_slippage_bps) / _BPS
         )
         estimated_fill_price = _round_up(
             reference_price * (Decimal("1") + parameters.effective_slippage_bps / _BPS),
-            parameters.price_tick,
+            tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
         )
         target_quantity = _round_down(
             intended_notional / cost_rate / reference_price, parameters.quantity_step
@@ -370,7 +380,7 @@ def _execute_ladder_change(
             symbol=symbol,
             status="TRADING",
             is_spot_trading_allowed=True,
-            price_tick_size=parameters.price_tick,
+            price_tick_size=tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
             quantity_step_size=parameters.quantity_step,
             min_quantity=parameters.quantity_step,
             min_notional=parameters.min_notional_twd,
@@ -478,23 +488,46 @@ def _execution_candles(
     return execution_candles
 
 
-def _disaster_event_for(
+def _risk_events_for(
     candles: tuple[Candle, ...],
     close_index: int,
     symbol: Symbol,
-    threshold_fraction: Decimal,
-) -> RiskEvent | None:
+    parameters: BacktestParameters,
+) -> tuple[RiskEvent, ...]:
+    """Disaster dual trigger + limit-day annotation at one decision close."""
+
     if close_index == 0:
-        return None
+        return ()
     previous = candles[close_index - 1]
     current = candles[close_index]
-    return detect_single_day_disaster(
+    events: list[RiskEvent] = []
+    single = detect_single_day_disaster(
         symbol=symbol,
         previous_close=previous.close_price,
         current_close=current.close_price,
         occurred_at=current.close_time,
-        threshold_fraction=threshold_fraction,
+        threshold_fraction=parameters.disaster_single_day_drop_fraction,
     )
+    if single is not None:
+        events.append(single)
+    multi = detect_multi_session_disaster(
+        symbol=symbol,
+        closes=tuple(candle.close_price for candle in candles[: close_index + 1]),
+        occurred_at=current.close_time,
+        sessions=parameters.disaster_multi_session_count,
+        threshold_fraction=parameters.disaster_multi_session_drop_fraction,
+    )
+    if multi is not None:
+        events.append(multi)
+    limit_day = detect_limit_day_open(
+        symbol=symbol,
+        prior_close=previous.close_price,
+        open_price=current.open_price,
+        occurred_at=current.open_time,
+    )
+    if limit_day is not None:
+        events.append(limit_day)
+    return tuple(events)
 
 
 def _domain_positions(state: AccountState) -> tuple[Position, ...]:

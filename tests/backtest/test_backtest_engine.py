@@ -13,7 +13,7 @@ _WARMUP = 200
 
 
 def _symbol(value: str, base_asset: str) -> Symbol:
-    return Symbol(value=value, base_asset=base_asset, quote_asset="USDT")
+    return Symbol(value=value, base_asset=base_asset, quote_asset="TWD")
 
 
 def _daily_candle(symbol: Symbol, index: int, close: Decimal) -> Candle:
@@ -52,17 +52,21 @@ def _candles_for(symbol: Symbol, prices: tuple[Decimal, ...]) -> tuple[Candle, .
 
 def _parameters(cost_multiplier: str = "1") -> BacktestParameters:
     return BacktestParameters(
-        risk_budgets={"BTCUSDT": Decimal("0.5"), "ETHUSDT": Decimal("0.5")},
+        risk_budgets={"0050": Decimal("0.5"), "0056": Decimal("0.5")},
         initial_cash=Decimal("1000"),
         account_id="bt-test",
-        fee_bps=Decimal("10"),
+        commission_bps=Decimal("10"),
+        min_fee=Decimal("0"),
+        sell_tax_bps_etf=Decimal("0"),
+        sell_tax_bps_stock=Decimal("0"),
         slippage_bps=Decimal("5"),
         quantity_step=Decimal("0.000001"),
-        price_tick=Decimal("0.01"),
         min_notional_twd=Decimal("10"),
         max_drawdown_fraction=Decimal("0.20"),
         daily_loss_pause_fraction=Decimal("0.05"),
         disaster_single_day_drop_fraction=Decimal("0.20"),
+        disaster_multi_session_count=3,
+        disaster_multi_session_drop_fraction=Decimal("0.50"),
         stale_data_max_age_seconds=129600,
         cost_multiplier=Decimal(cost_multiplier),
     )
@@ -70,8 +74,8 @@ def _parameters(cost_multiplier: str = "1") -> BacktestParameters:
 
 def _trend_and_crash_universe() -> dict[str, tuple[Candle, ...]]:
     return {
-        "BTCUSDT": _candles_for(_symbol("BTCUSDT", "BTC"), _trend_and_crash_series(Decimal("1"))),
-        "ETHUSDT": _candles_for(_symbol("ETHUSDT", "ETH"), _trend_and_crash_series(Decimal("0.1"))),
+        "0050": _candles_for(_symbol("0050", "0050"), _trend_and_crash_series(Decimal("1"))),
+        "0056": _candles_for(_symbol("0056", "0056"), _trend_and_crash_series(Decimal("0.1"))),
     }
 
 
@@ -106,22 +110,20 @@ def test_fills_only_happen_on_the_bar_after_the_decision() -> None:
 def test_buy_fill_price_includes_slippage_and_fee_assumptions() -> None:
     report = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
 
-    btc_buy = next(
-        fill
-        for fill in report.fills
-        if fill.side is OrderSide.BUY and fill.symbol.value == "BTCUSDT"
+    core_buy = next(
+        fill for fill in report.fills if fill.side is OrderSide.BUY and fill.symbol.value == "0050"
     )
-    # Open 201 with 5 bps slippage (201.1005), rounded up to the 0.01 tick.
-    assert btc_buy.price == Decimal("201.11")
-    expected_fee = btc_buy.quantity * btc_buy.price * Decimal("10") / Decimal("10000")
-    assert btc_buy.fee == expected_fee
+    # Open 201 with 5 bps slippage (201.1005), rounded up to the ETF 0.05 tick.
+    assert core_buy.price == Decimal("201.15")
+    expected_fee = core_buy.quantity * core_buy.price * Decimal("10") / Decimal("10000")
+    assert core_buy.fee == expected_fee
 
 
 def test_crash_day_emits_disaster_events_for_both_symbols() -> None:
     report = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
 
     disaster_symbols = {event.symbol.value for event in report.risk_events}
-    assert disaster_symbols == {"BTCUSDT", "ETHUSDT"}
+    assert disaster_symbols == {"0050", "0056"}
     for event in report.risk_events:
         # Crash from 223 to 100 is a ~55% single-day drop.
         assert event.observed_fraction > Decimal("0.5")
@@ -131,7 +133,7 @@ def test_cost_stress_multiplier_doubles_effective_costs() -> None:
     base = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
     stressed = run_backtest(_trend_and_crash_universe(), parameters=_parameters("2"))
 
-    assert stressed.cost_assumptions["fee_bps"] == "20"
+    assert stressed.cost_assumptions["commission_bps"] == "20"
     assert stressed.cost_assumptions["slippage_bps"] == "10"
     assert stressed.metrics.total_fees > base.metrics.total_fees
     assert stressed.metrics.final_equity < base.metrics.final_equity
@@ -158,8 +160,8 @@ def test_equity_curve_and_signal_counts_match_decision_days() -> None:
 
 def test_misaligned_decision_days_are_rejected() -> None:
     universe = _trend_and_crash_universe()
-    eth = universe["ETHUSDT"]
-    universe["ETHUSDT"] = eth[:-1]
+    eth = universe["0056"]
+    universe["0056"] = eth[:-1]
 
     with pytest.raises(BacktestError, match="align"):
         run_backtest(universe, parameters=_parameters())
@@ -167,7 +169,7 @@ def test_misaligned_decision_days_are_rejected() -> None:
 
 def test_candles_must_cover_exactly_the_budgeted_universe() -> None:
     universe = _trend_and_crash_universe()
-    universe.pop("ETHUSDT")
+    universe.pop("0056")
 
     with pytest.raises(BacktestError, match="universe"):
         run_backtest(universe, parameters=_parameters())

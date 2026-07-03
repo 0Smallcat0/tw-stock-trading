@@ -23,14 +23,18 @@ class RuntimeParameters:
     risk_budgets: Mapping[str, Decimal]
     initial_cash: Decimal
     account_id: str
-    fee_bps: Decimal
+    commission_bps: Decimal
+    min_fee: Decimal
+    sell_tax_bps_etf: Decimal
+    sell_tax_bps_stock: Decimal
     slippage_bps: Decimal
     quantity_step: Decimal
-    price_tick: Decimal
     min_notional_twd: Decimal
     max_drawdown_fraction: Decimal
     daily_loss_pause_fraction: Decimal
     disaster_single_day_drop_fraction: Decimal
+    disaster_multi_session_count: int
+    disaster_multi_session_drop_fraction: Decimal
     stale_data_max_age_seconds: int
     idempotency_namespace: str
 

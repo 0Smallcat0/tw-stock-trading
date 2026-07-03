@@ -15,21 +15,20 @@ class RiskGateError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RiskGateParameters:
-    """Risk thresholds copied into risk-local values by the composition layer."""
+    """Risk thresholds copied into risk-local values by the composition layer.
+
+    Staleness is a caller-provided FACT (``RiskGateContext.market_data_is_stale``),
+    not a gate computation: under the TW exchange calendar only the composition
+    layer can count trading days (weekends, holidays, typhoon closures add
+    zero age), and `src.risk` must not import the data layer.
+    """
 
     min_notional_twd: Decimal
-    stale_data_max_age_seconds: int
     max_drawdown_fraction: Decimal
     daily_loss_pause_fraction: Decimal
 
     def __post_init__(self) -> None:
         _require_positive_decimal("min_notional_twd", self.min_notional_twd)
-        if not isinstance(self.stale_data_max_age_seconds, int):
-            msg = "stale_data_max_age_seconds must be int"
-            raise RiskGateError(msg)
-        if self.stale_data_max_age_seconds <= 0:
-            msg = "stale_data_max_age_seconds must be positive"
-            raise RiskGateError(msg)
         _require_fraction("max_drawdown_fraction", self.max_drawdown_fraction)
         _require_fraction("daily_loss_pause_fraction", self.daily_loss_pause_fraction)
 
@@ -87,7 +86,11 @@ class RiskState:
 
 @dataclass(frozen=True, slots=True)
 class RiskGateContext:
-    """All caller-provided facts needed for one risk decision."""
+    """All caller-provided facts needed for one risk decision.
+
+    ``market_data_is_stale`` is computed by the composition layer against the
+    exchange trading calendar (trading-day age, not wall-clock seconds).
+    """
 
     current_position: Position | None
     account_snapshot: VirtualAccountSnapshot | None
@@ -97,8 +100,12 @@ class RiskGateContext:
     earliest_execution_time: datetime | None
     exchange_filters: RiskExchangeFilters | None
     risk_state: RiskState | None
+    market_data_is_stale: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.market_data_is_stale, bool):
+            msg = "market_data_is_stale must be bool"
+            raise RiskGateError(msg)
         if self.current_position is not None and not isinstance(self.current_position, Position):
             msg = "current_position must be Position or None"
             raise RiskGateError(msg)
