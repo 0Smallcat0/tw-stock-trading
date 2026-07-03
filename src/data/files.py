@@ -27,9 +27,15 @@ _FIELDS = (
 
 
 def candle_file_name(symbol_value: str, timeframe_value: str) -> str:
-    """Deterministic file name for one symbol/timeframe candle series."""
+    """Deterministic file name for one symbol/timeframe RAW candle series."""
 
     return f"{symbol_value}_{timeframe_value}.jsonl"
+
+
+def adjusted_candle_file_name(symbol_value: str, timeframe_value: str) -> str:
+    """Deterministic file name for the dividend/split-ADJUSTED series."""
+
+    return f"{symbol_value}_{timeframe_value}_adjusted.jsonl"
 
 
 def write_candles_jsonl(candles: tuple[Candle, ...], path: str | Path) -> Path:

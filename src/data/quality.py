@@ -1,33 +1,28 @@
-"""Validation helpers for public candle streams."""
+"""Calendar-aware validation for TW daily candle series.
+
+TW replaces the crypto edition's continuous-time rules:
+
+- GAP means a missing TRADING day per the exchange calendar; weekends,
+  holidays, and make-up-day closures are not gaps. Trading days inside a
+  known corporate-action halt (``expected_missing_dates``) are exempt.
+- STALE is measured in TRADING days between the latest candle and the
+  observation date — an 11-calendar-day Lunar New Year adds zero.
+"""
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Collection, Iterable
+from datetime import date
 
+from src.data.calendar import TradingCalendar
 from src.data.types import (
     CandleIssueCode,
     CandleQualityIssue,
     CandleQualityReport,
     MarketDataValidationError,
 )
-from src.domain import Candle, Timeframe
-
-_TIMEFRAME_DELTAS = {
-    "15m": timedelta(minutes=15),
-    "1d": timedelta(days=1),
-}
-
-
-def timeframe_delta(timeframe: Timeframe) -> timedelta:
-    """Return the expected candle spacing for a supported MVP timeframe."""
-
-    try:
-        return _TIMEFRAME_DELTAS[timeframe.value]
-    except KeyError as exc:
-        msg = f"unsupported timeframe for data quality checks: {timeframe.value}"
-        raise MarketDataValidationError(msg) from exc
+from src.domain import Candle
 
 
 def require_closed_candles(candles: Iterable[Candle]) -> tuple[Candle, ...]:
@@ -45,22 +40,21 @@ def require_closed_candles(candles: Iterable[Candle]) -> tuple[Candle, ...]:
     return candle_tuple
 
 
-def inspect_candle_quality(
+def inspect_daily_candle_quality(
     candles: Iterable[Candle],
     *,
-    timeframe: Timeframe,
-    observed_at: datetime,
-    stale_after: timedelta,
+    calendar: TradingCalendar,
+    observed_on: date,
+    stale_trading_days: int,
+    expected_missing_dates: Collection[date] = frozenset(),
 ) -> CandleQualityReport:
-    """Detect visible open-candle, duplicate, gap, and stale-data issues."""
+    """Detect open-candle, duplicate, gap, and staleness issues per symbol."""
 
-    _require_utc("observed_at", observed_at)
-    if stale_after <= timedelta(0):
-        msg = "stale_after must be positive"
+    if stale_trading_days <= 0:
+        msg = "stale_trading_days must be positive"
         raise MarketDataValidationError(msg)
 
     candle_tuple = tuple(candles)
-    expected_delta = timeframe_delta(timeframe)
     issues: list[CandleQualityIssue] = []
 
     for candle in candle_tuple:
@@ -74,65 +68,77 @@ def inspect_candle_quality(
                     detail="still-open candle must not enter strategy input",
                 )
             )
+        if candle.trading_date is None:
+            msg = (
+                "daily quality checks require trading_date on every candle "
+                f"({candle.symbol.value} {candle.open_time.isoformat()})"
+            )
+            raise MarketDataValidationError(msg)
 
-    candles_by_key: dict[tuple[str, str], list[Candle]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[Candle]] = defaultdict(list)
     for candle in candle_tuple:
-        candles_by_key[(candle.symbol.value, candle.timeframe.value)].append(candle)
+        grouped[(candle.symbol.value, candle.timeframe.value)].append(candle)
 
-    for (symbol, candle_timeframe), grouped_candles in candles_by_key.items():
-        sorted_candles = sorted(grouped_candles, key=lambda candle: candle.open_time)
-        seen_open_times: set[datetime] = set()
-        unique_closed_opens: list[datetime] = []
-        closed_candles: list[Candle] = []
-        for candle in sorted_candles:
-            if candle.open_time in seen_open_times:
+    for (symbol_value, timeframe_value), group in grouped.items():
+        ordered = sorted(group, key=lambda item: item.open_time)
+        seen_dates: set[date] = set()
+        unique_closed: list[Candle] = []
+        for candle in ordered:
+            candle_date = candle.trading_date
+            if candle_date is None:  # pragma: no cover - validated above
+                continue
+            if candle_date in seen_dates:
                 issues.append(
                     CandleQualityIssue(
                         code=CandleIssueCode.DUPLICATE,
-                        symbol=symbol,
-                        timeframe=candle_timeframe,
+                        symbol=symbol_value,
+                        timeframe=timeframe_value,
                         open_time=candle.open_time,
-                        detail="duplicate candle open time",
+                        detail=f"duplicate trading date {candle_date.isoformat()}",
                     )
                 )
                 continue
-            seen_open_times.add(candle.open_time)
+            seen_dates.add(candle_date)
             if candle.is_closed:
-                unique_closed_opens.append(candle.open_time)
-                closed_candles.append(candle)
+                unique_closed.append(candle)
 
-        for previous_open, next_open in zip(unique_closed_opens, unique_closed_opens[1:]):
-            expected_next_open = previous_open + expected_delta
-            if next_open > expected_next_open:
-                issues.append(
-                    CandleQualityIssue(
-                        code=CandleIssueCode.GAP,
-                        symbol=symbol,
-                        timeframe=candle_timeframe,
-                        expected_open_time=expected_next_open,
-                        actual_open_time=next_open,
-                        detail="missing candle interval",
+        for previous, current in zip(unique_closed, unique_closed[1:]):
+            previous_date = previous.trading_date
+            current_date = current.trading_date
+            if previous_date is None or current_date is None:  # pragma: no cover
+                continue
+            expected = calendar.next_trading_day(previous_date)
+            while expected < current_date:
+                if expected not in expected_missing_dates:
+                    issues.append(
+                        CandleQualityIssue(
+                            code=CandleIssueCode.GAP,
+                            symbol=symbol_value,
+                            timeframe=timeframe_value,
+                            expected_open_time=None,
+                            actual_open_time=current.open_time,
+                            detail=f"missing trading day {expected.isoformat()}",
+                        )
                     )
-                )
+                expected = calendar.next_trading_day(expected)
 
-        if closed_candles:
-            latest_candle = max(closed_candles, key=lambda candle: candle.close_time)
-            latest_closed_boundary = latest_candle.open_time + expected_delta
-            if observed_at - latest_closed_boundary > stale_after:
-                issues.append(
-                    CandleQualityIssue(
-                        code=CandleIssueCode.STALE,
-                        symbol=latest_candle.symbol.value,
-                        timeframe=latest_candle.timeframe.value,
-                        open_time=latest_candle.open_time,
-                        detail="latest closed candle is older than stale threshold",
+        if unique_closed:
+            latest = unique_closed[-1]
+            latest_date = latest.trading_date
+            if latest_date is not None and observed_on >= latest_date:
+                age = calendar.trading_days_between(latest_date, observed_on)
+                if age > stale_trading_days:
+                    issues.append(
+                        CandleQualityIssue(
+                            code=CandleIssueCode.STALE,
+                            symbol=symbol_value,
+                            timeframe=timeframe_value,
+                            open_time=latest.open_time,
+                            detail=(
+                                f"latest close {latest_date.isoformat()} is {age} "
+                                f"trading days old (limit {stale_trading_days})"
+                            ),
+                        )
                     )
-                )
 
     return CandleQualityReport(issues=tuple(issues))
-
-
-def _require_utc(name: str, value: datetime) -> None:
-    if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(value):
-        msg = f"{name} must be timezone-aware UTC"
-        raise MarketDataValidationError(msg)
