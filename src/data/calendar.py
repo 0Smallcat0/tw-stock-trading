@@ -128,6 +128,43 @@ class TradingCalendar:
             raise MarketDataValidationError(msg)
 
     @classmethod
+    def from_trading_dates(
+        cls,
+        trading_dates: Iterable[date],
+        *,
+        years: Iterable[int],
+    ) -> TradingCalendar:
+        """Build a historical calendar from a realized trading-day list.
+
+        The TWSE holiday API covers only the current year; for history the
+        FinMind ``TaiwanStockTradingDate`` list is ground truth. Closures =
+        weekdays of the covered years that did not trade (this inherently
+        includes typhoon days).
+
+        ``years`` must be COMPLETED years: passing an in-progress year would
+        mark every future weekday as a closure. Build the current year from
+        the planned holiday schedule instead (see the backfill script).
+        """
+
+        covered = frozenset(years)
+        if not covered:
+            msg = "years must not be empty"
+            raise MarketDataValidationError(msg)
+        traded = set(trading_dates)
+        outside = {value for value in traded if value.year not in covered}
+        if outside:
+            msg = f"trading dates outside covered years: {sorted(outside)[:3]}"
+            raise MarketDataValidationError(msg)
+        closures: set[date] = set()
+        for year in sorted(covered):
+            cursor = date(year, 1, 1)
+            while cursor.year == year:
+                if cursor.weekday() < _SATURDAY and cursor not in traded:
+                    closures.add(cursor)
+                cursor += timedelta(days=1)
+        return cls(covered_years=covered, closures=frozenset(closures))
+
+    @classmethod
     def from_holiday_entries(
         cls,
         entries: Iterable[HolidayEntry],

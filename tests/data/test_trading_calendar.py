@@ -143,3 +143,18 @@ def test_extra_closure_outside_schedule_year_is_rejected() -> None:
     entries = parse_holiday_schedule(list(_SCHEDULE_2026))
     with pytest.raises(MarketDataValidationError):
         TradingCalendar.from_holiday_entries(entries, year=2026, extra_closures=(date(2027, 1, 5),))
+
+
+def test_from_trading_dates_infers_closures_for_completed_years() -> None:
+    from datetime import timedelta
+
+    # Synthetic completed year: every weekday traded except two holidays.
+    holidays = {date(2025, 1, 1), date(2025, 4, 4)}
+    all_days = (date(2025, 1, 1) + timedelta(days=offset) for offset in range(365))
+    traded = [day for day in all_days if day.weekday() < 5 and day not in holidays]
+
+    calendar = TradingCalendar.from_trading_dates(traded, years=(2025,))
+
+    assert calendar.closures == frozenset(holidays)
+    assert calendar.is_trading_day(date(2025, 1, 2)) is True
+    assert calendar.is_trading_day(date(2025, 1, 1)) is False

@@ -38,3 +38,4 @@ Desktop.ini
 
 # Bulk backtest artifacts stay local; the registry and holdout lock are committed
 docs/reports/backtests/
+backfill_run.log

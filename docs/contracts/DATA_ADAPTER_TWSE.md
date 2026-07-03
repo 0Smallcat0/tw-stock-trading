@@ -44,10 +44,24 @@ GET {rwd}/rwd/zh/afterTrading/STOCK_DAY?date=YYYYMMDD&stockNo=0050&response=json
     MVP scope but documented to prevent a future unit bug).
 - Bulk alternative `MI_INDEX?type=ALLBUT0999` embeds HTML fragments inside
   values; strip before parsing.
-- Rate limits are undocumented; community-reported IP bans are real. Rules:
-  sequential requests only, >= `min_request_interval_seconds` (config,
-  default 3s) between requests, honest User-Agent. A 2010→2026 monthly
-  backfill is ~200 requests per symbol (~15 minutes).
+- Rate limits are undocumented but MEASURED (eight live backfill runs,
+  2026-07-03/04): the afterTrading/STOCK_DAY endpoint FAMILY soft-bans after
+  ~12-14 sequential requests regardless of spacing (3s), cookies,
+  connections, or sessions — banned requests receive the pre-floor stat
+  message for VALID dates, and the penalty lasts minutes. Corporate-action
+  endpoints (TWT49U/TWTCAU/TWTAUU) never tripped it across 56-request
+  sweeps. Consequences, baked into the design:
+  - Backfill uses FinMind as the BULK series and verifies against TWSE by
+    sampling: the most recent 13 months exhaustively plus one month per
+    older year, with a penalty-box retry ladder (12s → 60s → 300s) that
+    outlasts the ban when a sweep trips it. Full-sweep verification is an
+    optional overnight exercise, not the default.
+  - The daily runtime touches STOCK_DAY once per day (current month) —
+    far below any observed threshold.
+  - Corporate-action sweeps are cached to disk
+    (`data/candles/corporate_actions_all.json`) so reruns skip the burst.
+  - Sequential requests only, >= `min_request_interval_seconds` (config,
+    default 6s), honest User-Agent, cookies cleared per request.
 
 ## Backfill + Cross-Check: FinMind
 
@@ -74,8 +88,12 @@ TWT49U  {rwd}/rwd/zh/exRight/TWT49U?startDate=..&endDate=..&response=json
         ex-dividend/rights RESULTS since 2003-05-05
         (pre-~2011 rows use a 17-column schema with 權值/息值 split — parse by name)
 TWTCAU  {rwd}/rwd/zh/split/TWTCAU?...      ETF split/reverse-split reference prices
-        (verified 0050 row: halted 2025-06-11~17, resumed 06-18, 188.65 → 47.16)
+        (verified 0050 row: halted 2025-06-11~17, resumed 06-18, reference
+        188.65 → 47.16; the resumption-day CLOSE was 47.57 — never treat the
+        reference price as a close. Code column is named ETF代號.)
 TWTAUU  {rwd}/rwd/zh/reducation/TWTAUU?... capital-reduction reference prices
+        (TWTCAU/TWTAUU reject queries before ROC year 100 — history floor
+        2011-01-01, verified live; pre-2011 events are invisible here)
 OpenAPI /v1/exchangeReport/TWT48U_ALL      upcoming ex-dividend schedule
         (ETF cash amount can be empty until ~1 week before the ex-date)
 FinMind TaiwanStockDividendResult / TaiwanStockSplitPrice /
