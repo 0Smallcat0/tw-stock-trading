@@ -1,81 +1,29 @@
-"""Public market data entry points."""
+"""Public market data entry points.
 
-from src.binance_public_hosts import (
-    BINANCE_PUBLIC_REST_BASE_URL_CANDIDATES,
-    BINANCE_PUBLIC_WS_STREAM_BASE_URL_CANDIDATES,
-)
-from src.data.binance import (
-    BinanceSpotPublicClient,
-    build_closed_kline_stream_url,
-    build_universe_eligibility_metrics,
-    build_universe_snapshot,
-    parse_book_ticker_payload,
-    parse_depth_snapshot_payload,
-    parse_exchange_info_symbol_filters,
-    parse_rest_kline_rows,
-    parse_runtime_closed_kline_message,
-    symbol_from_binance_native,
-)
+The TWSE/FinMind clients, the trading calendar, and the corporate-action
+adjustment pipeline land in Goals TW-B/TW-C per `GOALS.md`.
+"""
+
 from src.data.files import candle_file_name, read_candles_jsonl, write_candles_jsonl
 from src.data.quality import inspect_candle_quality, require_closed_candles, timeframe_delta
-from src.data.smoke import (
-    PublicDataSmokeResult,
-    PublicDataSmokeStatus,
-    dns_resolves,
-    first_passing_public_rest_base_url,
-    run_public_rest_smoke,
-    smoke_public_rest_base_url,
-)
 from src.data.types import (
-    BookTickerSnapshot,
     CandleIssueCode,
     CandleQualityIssue,
     CandleQualityReport,
-    DepthLevel,
-    DepthSnapshot,
     MarketDataError,
     MarketDataValidationError,
-    SymbolFilters,
-    UniverseEligibilityMetrics,
-    UniverseSelectionRules,
-    UniverseSnapshot,
 )
 
 __all__ = [
-    "BINANCE_PUBLIC_REST_BASE_URL_CANDIDATES",
-    "BINANCE_PUBLIC_WS_STREAM_BASE_URL_CANDIDATES",
-    "BinanceSpotPublicClient",
-    "BookTickerSnapshot",
     "CandleIssueCode",
     "CandleQualityIssue",
     "CandleQualityReport",
-    "DepthLevel",
-    "DepthSnapshot",
     "MarketDataError",
     "MarketDataValidationError",
-    "PublicDataSmokeResult",
-    "PublicDataSmokeStatus",
-    "SymbolFilters",
-    "UniverseEligibilityMetrics",
-    "UniverseSelectionRules",
-    "UniverseSnapshot",
-    "build_closed_kline_stream_url",
-    "build_universe_eligibility_metrics",
-    "build_universe_snapshot",
     "candle_file_name",
-    "dns_resolves",
-    "first_passing_public_rest_base_url",
     "inspect_candle_quality",
-    "parse_book_ticker_payload",
-    "parse_depth_snapshot_payload",
-    "parse_exchange_info_symbol_filters",
-    "parse_rest_kline_rows",
-    "parse_runtime_closed_kline_message",
     "read_candles_jsonl",
     "require_closed_candles",
-    "run_public_rest_smoke",
-    "smoke_public_rest_base_url",
-    "symbol_from_binance_native",
     "timeframe_delta",
     "write_candles_jsonl",
 ]

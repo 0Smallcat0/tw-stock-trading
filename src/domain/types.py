@@ -86,7 +86,11 @@ def _require_risk_decision_status(name: str, value: RiskDecisionStatus) -> None:
 
 @dataclass(frozen=True, slots=True)
 class Symbol:
-    """Binance-native trading symbol with explicit assets."""
+    """Exchange-native trading symbol with explicit assets.
+
+    TW securities use the numeric exchange code as both value and base asset
+    (for example value ``0050``, base ``0050``, quote ``TWD``).
+    """
 
     value: str
     base_asset: str

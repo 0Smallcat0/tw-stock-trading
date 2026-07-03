@@ -17,13 +17,13 @@ class RiskGateError(ValueError):
 class RiskGateParameters:
     """Risk thresholds copied into risk-local values by the composition layer."""
 
-    min_notional_usdt: Decimal
+    min_notional_twd: Decimal
     stale_data_max_age_seconds: int
     max_drawdown_fraction: Decimal
     daily_loss_pause_fraction: Decimal
 
     def __post_init__(self) -> None:
-        _require_positive_decimal("min_notional_usdt", self.min_notional_usdt)
+        _require_positive_decimal("min_notional_twd", self.min_notional_twd)
         if not isinstance(self.stale_data_max_age_seconds, int):
             msg = "stale_data_max_age_seconds must be int"
             raise RiskGateError(msg)

@@ -7,55 +7,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Protocol
 
 from src.domain import Symbol, Timeframe
 
 
 class FeaturePipelineValidationError(ValueError):
     """Raised when candles are not safe for feature generation."""
-
-
-class FeaturePipelineParameterValues(Protocol):
-    """Readable lookback values accepted by the feature pipeline."""
-
-    @property
-    def momentum_lookback_candles(self) -> int: ...
-
-    @property
-    def trend_lookback_candles(self) -> int: ...
-
-    @property
-    def breakout_lookback_candles(self) -> int: ...
-
-    @property
-    def volume_lookback_candles(self) -> int: ...
-
-    @property
-    def volatility_lookback_candles(self) -> int: ...
-
-
-@dataclass(frozen=True, slots=True)
-class FeaturePipelineConfig:
-    """Lookback windows for neutral candle-derived features."""
-
-    momentum_lookback_candles: int = 12
-    trend_lookback_candles: int = 48
-    breakout_lookback_candles: int = 96
-    volume_lookback_candles: int = 96
-    volatility_lookback_candles: int = 48
-
-    def __post_init__(self) -> None:
-        for name, value in (
-            ("momentum_lookback_candles", self.momentum_lookback_candles),
-            ("trend_lookback_candles", self.trend_lookback_candles),
-            ("breakout_lookback_candles", self.breakout_lookback_candles),
-            ("volume_lookback_candles", self.volume_lookback_candles),
-            ("volatility_lookback_candles", self.volatility_lookback_candles),
-        ):
-            if value <= 0:
-                msg = f"{name} must be positive"
-                raise FeaturePipelineValidationError(msg)
 
 
 @dataclass(frozen=True, slots=True)

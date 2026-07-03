@@ -1,29 +1,33 @@
-# Crypto Quant Signal MVP
+# TW Stock Signal MVP
 
-A crypto spot, long-only, public-data, DAILY signal notification system.
+A Taiwan-listed-equity, long-only, public-data, DAILY signal notification system.
 
-Every day after the UTC close, the system tells the user what to buy or sell and why;
-the user executes manually. A `1000 USDT` virtual account follows every signal in
-parallel as the honest scoreboard, recording virtual decisions, orders, fills,
-positions, cash, PnL, rejected orders, and risk events. The system never submits real
-exchange orders, never reads private account balances, and never requires API keys —
-permanently, by product definition.
+Every trading day after the Taipei close (data final ~17:30, job at 18:00), the
+system tells the user what the 0050 exposure ladder should do and why; the user
+executes manually on the next trading day. A `100,000 TWD` virtual account
+follows every signal in parallel as the honest scoreboard, recording virtual
+decisions, orders, fills, positions, cash, PnL, dividends, rejected orders, and
+risk events. The system never submits real orders, never touches a brokerage
+account or broker API, and never requires any credential — permanently, by
+product definition.
 
-Design decisions are grounded in adversarially verified research:
-`docs/research/SIGNAL_DESIGN_RESEARCH.md`. Work queue: `GOALS.md` (v0.9).
+This project is the Taiwan sibling of the crypto signal MVP it was forked from
+(same architecture, same six-gate validation discipline). The value proposition
+is different and honest: the registered claim is **drawdown reduction, not
+return enhancement** — evidence says index-level trend timing should not be
+expected to beat 0050 buy-and-hold on CAGR
+(`docs/research/TW_SIGNAL_DESIGN_RESEARCH.md`).
+
+Design decisions are grounded in verified research:
+`docs/research/TW_SIGNAL_DESIGN_RESEARCH.md` and the adaptation plan
+`docs/plans/TW_STOCK_VERSION_PLAN.md`. Work queue: `GOALS.md`.
 Qualification standard: `docs/contracts/VALIDATION_GATE_CONTRACT.md`.
 
-## Goal A Status
+## Status
 
-This repository currently contains the foundation scaffold only:
-
-- Python 3.12 project configuration.
-- Source, config, docs, scripts, and test directories.
-- Local TimescaleDB/PostgreSQL-compatible Docker Compose file.
-- Baseline lint, format, type, import-boundary, and test tooling.
-
-No strategy, data fetching, execution, runtime loop, dashboard behavior, research lab, real
-exchange API, or private API code is implemented in Goal A.
+Goal TW-A (bootstrap) done: crypto-specific code removed, TW identity and
+contracts in place, baseline green. The TWSE/FinMind data layer, trading
+calendar, and corporate-action adjustment pipeline land in Goals TW-B/TW-C.
 
 ## Local Setup
 
@@ -44,21 +48,15 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\lint-imports
 .\.venv\Scripts\python.exe -m pytest -m "not network" tests -q
 docker compose config
-docker compose up -d --wait
-docker compose down
-git remote -v
 ```
-
-`git remote -v` should print nothing for Goal A.
 
 ## Local Database
 
 The local database service uses dummy development credentials only:
 
-- Host port: `54320`
-- Database: `crypto_quant`
-- User: `crypto`
-- Password: `crypto_dev_only`
+- Host port: `54321` (54320 belongs to the crypto sibling project)
+- Database: `tw_quant`
+- User: `tw`
+- Password: `tw_dev_only`
 
 These are local Docker credentials, not production secrets.
-

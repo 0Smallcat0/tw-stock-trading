@@ -81,7 +81,7 @@ def main() -> None:
         slippage_bps=config.execution.slippage_bps,
         quantity_step=config.execution.quantity_step,
         price_tick=config.execution.price_tick,
-        min_notional_usdt=config.risk.min_notional_usdt,
+        min_notional_twd=config.risk.min_notional_twd,
         max_drawdown_fraction=config.risk.max_drawdown_fraction,
         daily_loss_pause_fraction=config.risk.daily_loss_pause_fraction,
         disaster_single_day_drop_fraction=config.risk.disaster_single_day_drop_fraction,
