@@ -110,24 +110,25 @@ class SignalRuntime:
             symbol_value: _closed_sorted(candles, symbol_value)
             for symbol_value, candles in candles_by_symbol.items()
         }
-        latest = self._aligned_latest_candles(ordered)
-        close_time = next(iter(latest.values())).close_time
-
-        if self._last_processed is not None and close_time <= self._last_processed:
-            return _skipped("ALREADY_PROCESSED")
-
         short_history = [
             symbol_value
             for symbol_value, candles in ordered.items()
             if len(candles) < DAILY_TREND_WARMUP_CANDLES
         ]
         if short_history:
+            warmup_close = max(candles[-1].close_time for candles in ordered.values())
             self._append_health(
-                close_time,
+                warmup_close,
                 WARMUP_INSUFFICIENT_HISTORY,
                 {"symbols": sorted(short_history)},
             )
             return _skipped(WARMUP_INSUFFICIENT_HISTORY, health=(WARMUP_INSUFFICIENT_HISTORY,))
+
+        latest = self._aligned_latest_candles(ordered)
+        close_time = max(candle.close_time for candle in latest.values())
+
+        if self._last_processed is not None and close_time <= self._last_processed:
+            return _skipped("ALREADY_PROCESSED")
 
         decision_time = observed_at or close_time
         health_codes: list[str] = []
@@ -667,8 +668,11 @@ class SignalRuntime:
         self, ordered: Mapping[str, tuple[Candle, ...]]
     ) -> dict[str, Candle]:
         latest = {symbol_value: candles[-1] for symbol_value, candles in ordered.items()}
-        close_times = {candle.close_time for candle in latest.values()}
-        if len(close_times) != 1:
+        # Align by trading day, not exact close timestamp: exchange-maintenance
+        # days produce truncated daily candles whose close times differ by
+        # milliseconds across symbols (e.g. Binance 2018-02-08).
+        open_dates = {candle.open_time.date() for candle in latest.values()}
+        if len(open_dates) != 1:
             msg = "latest closed candles must align across all budgeted symbols"
             raise RuntimeEngineError(msg)
         return latest

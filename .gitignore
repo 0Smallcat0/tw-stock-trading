@@ -35,3 +35,6 @@ postgres-data/
 *.swp
 Thumbs.db
 Desktop.ini
+
+# Bulk backtest artifacts stay local; the registry and holdout lock are committed
+docs/reports/backtests/

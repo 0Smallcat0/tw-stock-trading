@@ -263,12 +263,19 @@ class RiskConfig(CoreConfigModel):
 
     The stale-data default fits the daily decision cadence: a daily close
     older than 36 hours means the feed is broken, so new exposure halts.
+
+    The drawdown pause measures from the all-time equity peak and blocks new
+    buys; verified research expects 50-60% drawdowns as NORMAL for the daily
+    trend ensemble (docs/research/SIGNAL_DESIGN_RESEARCH.md section 4), so the
+    pause sits above that band as a disaster brake, not inside it. Trial 1
+    proved the old 20% default from the 15m era locks the strategy out
+    permanently after the first bear market.
     """
 
     min_notional_usdt: Decimal = Decimal("10")
     stale_data_max_age_seconds: int = 129600
-    max_drawdown_fraction: Decimal = Decimal("0.20")
-    daily_loss_pause_fraction: Decimal = Decimal("0.05")
+    max_drawdown_fraction: Decimal = Decimal("0.65")
+    daily_loss_pause_fraction: Decimal = Decimal("0.10")
     disaster_single_day_drop_fraction: Decimal = Decimal("0.20")
     short_exposure_enabled: bool = False
     margin_enabled: bool = False

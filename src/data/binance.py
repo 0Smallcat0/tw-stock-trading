@@ -15,6 +15,7 @@ from src.binance_public_hosts import (
     BINANCE_REST_BASE_URL,
     BINANCE_WS_BASE_URL,
 )
+from src.data.quality import timeframe_delta
 from src.data.types import (
     BookTickerSnapshot,
     DepthLevel,
@@ -109,6 +110,46 @@ class BinanceSpotPublicClient:
             return tuple(candle for candle in candles if candle.is_closed)
         return candles
 
+    async def fetch_historical_candles_range(
+        self,
+        *,
+        symbol: Symbol,
+        timeframe: Timeframe,
+        start_time: datetime,
+        received_at: datetime | None = None,
+        max_requests: int = 20,
+    ) -> tuple[Candle, ...]:
+        """Fetch the full closed-candle history from start_time via pagination.
+
+        Binance caps klines at 1000 per request; this walks forward request by
+        request, deduplicates on open_time, and stops when the exchange has no
+        newer closed candles.
+        """
+
+        _require_utc("start_time", start_time)
+        if max_requests <= 0:
+            msg = "max_requests must be positive"
+            raise MarketDataValidationError(msg)
+
+        collected: dict[datetime, Candle] = {}
+        cursor = start_time
+        for _ in range(max_requests):
+            batch = await self.fetch_historical_candles(
+                symbol=symbol,
+                timeframe=timeframe,
+                start_time=cursor,
+                limit=1000,
+                received_at=received_at,
+                closed_only=True,
+            )
+            new_candles = [candle for candle in batch if candle.open_time not in collected]
+            for candle in new_candles:
+                collected[candle.open_time] = candle
+            if not new_candles or len(batch) < 1000:
+                break
+            cursor = max(candle.open_time for candle in new_candles) + timeframe_delta(timeframe)
+        return tuple(sorted(collected.values(), key=lambda candle: candle.open_time))
+
     async def fetch_symbol_filters(
         self,
         symbols: Iterable[str] | None = None,
@@ -120,7 +161,8 @@ class BinanceSpotPublicClient:
         if len(symbol_tuple) == 1:
             params["symbol"] = symbol_tuple[0]
         elif len(symbol_tuple) > 1:
-            params["symbols"] = json.dumps(symbol_tuple)
+            # Binance rejects the query when the JSON list contains spaces.
+            params["symbols"] = json.dumps(symbol_tuple, separators=(",", ":"))
 
         response = await self._http_client.get("/api/v3/exchangeInfo", params=params)
         response.raise_for_status()
