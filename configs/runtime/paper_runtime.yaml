@@ -87,6 +87,7 @@ storage:
   database: tw_quant
   username: tw
   password: tw_dev_only
+  calendar_schedule_directory: data/calendar
   snapshot_directory: docs/reports/config-snapshots
   trial_registry_path: docs/reports/research/trial_registry.jsonl
   holdout_lock_path: docs/reports/research/holdout_lock.json

@@ -231,16 +231,18 @@ alignment all sit on it.
   only — persisted schedule files per year), unscheduled-closure
   reconciliation protocol (typhoon days) per `DATA_ADAPTER_TWSE.md`.
 - Domain: `Candle.trading_date` (Taipei date) alongside UTC timestamps;
-  ledger event type enums for dividends/splits (types only; accounting logic
-  lands in TW-D).
-- Config: calendar file path + schedule-refresh settings.
+  fixed UTC+8 `TAIPEI_TZ` (no DST in Taiwan since 1980, no tzdata needed).
+  Ledger dividend/split event types land in TW-D together with their logic.
+- ROC date parsing (`src/data/roc_dates.py`): all three TWSE formats.
+- Config: calendar schedule directory under storage.
 - Fixtures: 2026 official schedule (verified 2026-02-20 make-up-day closure,
   LNY block 2/12-2/20), synthetic typhoon-day cases.
 
 ### Done When
 
-- calendar arithmetic proven by tests: LNY gap, make-up Saturday closed,
-  cross-year queries, typhoon reconciliation states
+- calendar arithmetic proven by tests: LNY gap, make-up-day closed,
+  cross-year queries, typhoon extra-closures, coverage errors outside known
+  years (the calendar never guesses)
 - `trading_date` present on candles and file round-trips
 - baseline verification passes
 

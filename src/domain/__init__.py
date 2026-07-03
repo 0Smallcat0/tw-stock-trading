@@ -1,6 +1,7 @@
 """Shared domain types for the paper-trading MVP."""
 
 from src.domain.types import (
+    TAIPEI_TZ,
     Candle,
     DomainValidationError,
     Fee,
@@ -19,9 +20,11 @@ from src.domain.types import (
     VirtualAccountSnapshot,
     VirtualFill,
     VirtualOrder,
+    taipei_date,
 )
 
 __all__ = [
+    "TAIPEI_TZ",
     "Candle",
     "DomainValidationError",
     "Fee",
@@ -40,4 +43,5 @@ __all__ = [
     "VirtualAccountSnapshot",
     "VirtualFill",
     "VirtualOrder",
+    "taipei_date",
 ]
