@@ -23,6 +23,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Runtime event store path (default: storage config).",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Listen port (default: api_dashboard config).",
+    )
     return parser.parse_args()
 
 
@@ -36,8 +42,9 @@ def main() -> None:
         risk_budgets={
             symbol: str(budget) for symbol, budget in config.portfolio.risk_budgets.items()
         },
+        initial_cash=str(config.account.initial_cash),
     )
-    uvicorn.run(app, host=config.api_dashboard.host, port=config.api_dashboard.port)
+    uvicorn.run(app, host=config.api_dashboard.host, port=args.port or config.api_dashboard.port)
 
 
 if __name__ == "__main__":

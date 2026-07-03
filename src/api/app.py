@@ -28,6 +28,7 @@ def create_dashboard_app(
     trial_registry_path: str | Path,
     holdout_lock_path: str | Path,
     risk_budgets: dict[str, str],
+    initial_cash: str = "1000",
 ) -> FastAPI:
     """Build the read-only dashboard app bound to artifact paths."""
 
@@ -75,6 +76,7 @@ def create_dashboard_app(
         return {
             "status": "OK",
             "close_time": payload.get("close_time"),
+            "initial_cash": initial_cash,
             "account": payload.get("account"),
             "executed_fractions": payload.get("executed_fractions"),
             "decision_fractions": payload.get("decision_fractions"),
@@ -113,10 +115,11 @@ def create_dashboard_app(
     def fills(limit: int = 100) -> dict[str, Any]:
         store = _store()
         events = store.events_of_kind("fill")
-        return {
-            "count": len(events),
-            "fills": [{"key": event.key, **dict(event.payload)} for event in events[-limit:]][::-1],
-        }
+        rows = []
+        for event in events[-limit:]:
+            payload = {key: value for key, value in event.payload.items() if key != "checkpoint"}
+            rows.append({"key": event.key, "recorded_at": event.recorded_at.isoformat(), **payload})
+        return {"count": len(events), "fills": rows[::-1]}
 
     @app.get("/api/rejections")
     def rejections(limit: int = 100) -> dict[str, Any]:
@@ -124,7 +127,10 @@ def create_dashboard_app(
         events = store.events_of_kind("rejection")
         return {
             "count": len(events),
-            "rejections": [dict(event.payload) for event in events[-limit:]][::-1],
+            "rejections": [
+                {"recorded_at": event.recorded_at.isoformat(), **dict(event.payload)}
+                for event in events[-limit:]
+            ][::-1],
         }
 
     @app.get("/api/risk")
@@ -133,7 +139,10 @@ def create_dashboard_app(
         events = store.events_of_kind("risk_event")
         health = store.events_of_kind("health")
         return {
-            "risk_events": [dict(event.payload) for event in events[-50:]][::-1],
+            "risk_events": [
+                {"recorded_at": event.recorded_at.isoformat(), **dict(event.payload)}
+                for event in events[-50:]
+            ][::-1],
             "health": [
                 {"recorded_at": event.recorded_at.isoformat(), **dict(event.payload)}
                 for event in health[-50:]
