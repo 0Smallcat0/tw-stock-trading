@@ -110,7 +110,7 @@ def test_trial_registry_assigns_monotonic_ids_and_round_trips(tmp_path: Path) ->
         code_version="abc1234",
         strategy_id="daily_trend_ensemble",
         parameters={"lookbacks": "20,65,150,200"},
-        universe=("BTCUSDT", "ETHUSDT"),
+        universe=("0050", "0056"),
         data_start=_NOW - timedelta(days=400),
         data_end=_NOW - timedelta(days=10),
         cost_assumptions={"fee_bps": "10"},
@@ -124,7 +124,7 @@ def test_trial_registry_assigns_monotonic_ids_and_round_trips(tmp_path: Path) ->
         code_version="abc1234",
         strategy_id="daily_trend_ensemble",
         parameters={"lookbacks": "20,65,150,200"},
-        universe=("BTCUSDT", "ETHUSDT"),
+        universe=("0050", "0056"),
         data_start=_NOW - timedelta(days=400),
         data_end=_NOW - timedelta(days=10),
         cost_assumptions={"fee_bps": "20"},
@@ -196,24 +196,28 @@ def _flat_universe(days: int) -> dict[str, tuple[Candle, ...]]:
         return tuple(result)
 
     return {
-        "BTCUSDT": candles(Symbol(value="BTCUSDT", base_asset="BTC", quote_asset="USDT")),
-        "ETHUSDT": candles(Symbol(value="ETHUSDT", base_asset="ETH", quote_asset="USDT")),
+        "0050": candles(Symbol(value="0050", base_asset="BTC", quote_asset="TWD")),
+        "0056": candles(Symbol(value="0056", base_asset="ETH", quote_asset="TWD")),
     }
 
 
 def _parameters() -> BacktestParameters:
     return BacktestParameters(
-        risk_budgets={"BTCUSDT": Decimal("0.5"), "ETHUSDT": Decimal("0.5")},
+        risk_budgets={"0050": Decimal("0.5"), "0056": Decimal("0.5")},
         initial_cash=Decimal("1000"),
         account_id="bt-test",
-        fee_bps=Decimal("10"),
+        commission_bps=Decimal("10"),
+        min_fee=Decimal("0"),
+        sell_tax_bps_etf=Decimal("0"),
+        sell_tax_bps_stock=Decimal("0"),
         slippage_bps=Decimal("5"),
         quantity_step=Decimal("0.000001"),
-        price_tick=Decimal("0.01"),
         min_notional_twd=Decimal("10"),
         max_drawdown_fraction=Decimal("0.20"),
         daily_loss_pause_fraction=Decimal("0.05"),
         disaster_single_day_drop_fraction=Decimal("0.20"),
+        disaster_multi_session_count=3,
+        disaster_multi_session_drop_fraction=Decimal("0.50"),
         stale_data_max_age_seconds=129600,
     )
 

@@ -22,6 +22,9 @@ class LedgerEventType(Enum):
     POSITION_CHANGED = "POSITION_CHANGED"
     REJECTED_ORDER_RECORDED = "REJECTED_ORDER_RECORDED"
     SNAPSHOT_MARKED = "SNAPSHOT_MARKED"
+    DIVIDEND_ACCRUED = "DIVIDEND_ACCRUED"
+    DIVIDEND_PAID = "DIVIDEND_PAID"
+    SPLIT_ADJUSTED = "SPLIT_ADJUSTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,8 @@ class LedgerEvent:
     realized_pnl_delta: Decimal = Decimal("0")
     fee: Decimal = Decimal("0")
     slippage: Decimal = Decimal("0")
+    tax: Decimal = Decimal("0")
+    dividends_receivable_delta: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         _require_non_empty("event_id", self.event_id)
@@ -86,11 +91,18 @@ class LedgerEvent:
         _require_decimal("realized_pnl_delta", self.realized_pnl_delta)
         _require_non_negative_decimal("fee", self.fee)
         _require_non_negative_decimal("slippage", self.slippage)
+        _require_non_negative_decimal("tax", self.tax)
+        _require_decimal("dividends_receivable_delta", self.dividends_receivable_delta)
 
 
 @dataclass(frozen=True, slots=True)
 class AccountState:
-    """Point-in-time virtual account accounting state."""
+    """Point-in-time virtual account accounting state.
+
+    ``dividends_receivable`` holds gross dividends between the ex-date (when
+    the raw price already dropped) and the payment date; it counts toward
+    equity so the scoreboard never shows a phantom loss across that window.
+    """
 
     account_id: str
     cash: Decimal
@@ -101,10 +113,12 @@ class AccountState:
     peak_equity: Decimal
     drawdown: Decimal
     updated_at: datetime
+    dividends_receivable: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         _require_non_empty("account_id", self.account_id)
         _require_non_negative_decimal("cash", self.cash)
+        _require_non_negative_decimal("dividends_receivable", self.dividends_receivable)
         if not isinstance(self.positions, tuple):
             msg = "positions must be a tuple"
             raise AccountingError(msg)

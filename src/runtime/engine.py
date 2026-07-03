@@ -33,6 +33,8 @@ from src.execution import (
     PaperBroker,
     PaperBrokerParameters,
     PaperMarketPrice,
+    tw_instrument_type,
+    tw_tick_for,
 )
 from src.features import DAILY_TREND_WARMUP_CANDLES, build_daily_trend_snapshots
 from src.notify import (
@@ -51,6 +53,8 @@ from src.risk import (
     RiskGateContext,
     RiskGateParameters,
     RiskState,
+    detect_limit_day_open,
+    detect_multi_session_disaster,
     detect_single_day_disaster,
     evaluate_order_intent,
 )
@@ -212,20 +216,24 @@ class SignalRuntime:
             if notification is not None:
                 notifications.append(notification)
 
-            disaster = _disaster_for(ordered[symbol_value], symbols[symbol_value], self._parameters)
-            if disaster is not None:
+            for risk_event in _risk_events_for(
+                ordered[symbol_value], symbols[symbol_value], self._parameters
+            ):
                 self._store.append(
                     kind="risk_event",
-                    key=f"risk_event:{symbol_value}:{close_time.isoformat()}",
+                    key=(
+                        f"risk_event:{symbol_value}:{risk_event.event_type}"
+                        f":{close_time.isoformat()}"
+                    ),
                     recorded_at=decision_time,
                     payload={
                         "symbol": symbol_value,
-                        "event_type": disaster.event_type,
-                        "observed_fraction": str(disaster.observed_fraction),
-                        "reason_codes": list(disaster.reason_codes),
+                        "event_type": risk_event.event_type,
+                        "observed_fraction": str(risk_event.observed_fraction),
+                        "reason_codes": list(risk_event.reason_codes),
                     },
                 )
-                health_codes.append(disaster.event_type)
+                health_codes.append(risk_event.event_type)
 
         target_set = build_ladder_targets(
             tuple(decisions[symbol_value] for symbol_value in sorted(symbols)),
@@ -281,10 +289,12 @@ class SignalRuntime:
     ) -> tuple[tuple[VirtualFill, ...], tuple[tuple[str, tuple[str, ...]], ...]]:
         broker = PaperBroker(
             PaperBrokerParameters(
-                fee_bps=self._parameters.fee_bps,
+                commission_bps=self._parameters.commission_bps,
+                min_fee=self._parameters.min_fee,
+                sell_tax_bps_etf=self._parameters.sell_tax_bps_etf,
+                sell_tax_bps_stock=self._parameters.sell_tax_bps_stock,
                 slippage_bps=self._parameters.slippage_bps,
                 quantity_step=self._parameters.quantity_step,
-                price_tick=self._parameters.price_tick,
                 min_notional=self._parameters.min_notional_twd,
             )
         )
@@ -350,6 +360,7 @@ class SignalRuntime:
                 symbols=symbols,
                 execution_time=execution_time,
                 latest_market_data_at=latest_market_data_at,
+                stale=stale,
                 order_key=order_key,
                 equity_at_open=equity_at_open,
             )
@@ -380,6 +391,7 @@ class SignalRuntime:
         symbols: Mapping[str, Symbol],
         execution_time: datetime,
         latest_market_data_at: datetime,
+        stale: bool,
         order_key: str,
         equity_at_open: Decimal,
     ) -> tuple[str, ...] | None:
@@ -405,11 +417,12 @@ class SignalRuntime:
                 )
         else:
             side = OrderSide.BUY
-            fee_rate = parameters.fee_bps / _BPS
-            cost_rate = Decimal("1") + (parameters.fee_bps + parameters.slippage_bps) / _BPS
+            # Buys carry commission only (the transaction tax is sell-side).
+            fee_rate = parameters.commission_bps / _BPS
+            cost_rate = Decimal("1") + (parameters.commission_bps + parameters.slippage_bps) / _BPS
             estimated_fill = _round_up(
                 reference_price * (Decimal("1") + parameters.slippage_bps / _BPS),
-                parameters.price_tick,
+                tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
             )
             target_quantity = _round_down(
                 intended_notional / cost_rate / reference_price,
@@ -448,7 +461,7 @@ class SignalRuntime:
                 symbol=symbol,
                 status="TRADING",
                 is_spot_trading_allowed=True,
-                price_tick_size=parameters.price_tick,
+                price_tick_size=tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
                 quantity_step_size=parameters.quantity_step,
                 min_quantity=parameters.quantity_step,
                 min_notional=parameters.min_notional_twd,
@@ -457,10 +470,10 @@ class SignalRuntime:
                 peak_equity=ledger.state.peak_equity,
                 start_of_day_equity=self._start_of_day_equity,
             ),
+            market_data_is_stale=stale,
         )
         gate_parameters = RiskGateParameters(
             min_notional_twd=parameters.min_notional_twd,
-            stale_data_max_age_seconds=parameters.stale_data_max_age_seconds,
             max_drawdown_fraction=parameters.max_drawdown_fraction,
             daily_loss_pause_fraction=parameters.daily_loss_pause_fraction,
         )
@@ -836,20 +849,44 @@ def _closed_sorted(candles: tuple[Candle, ...], symbol_value: str) -> tuple[Cand
     return tuple(sorted(candles, key=lambda candle: candle.open_time))
 
 
-def _disaster_for(
+def _risk_events_for(
     candles: tuple[Candle, ...],
     symbol: Symbol,
     parameters: RuntimeParameters,
-) -> RiskEvent | None:
+) -> tuple[RiskEvent, ...]:
+    """Disaster dual trigger + limit-day annotation for one symbol's day."""
+
     if len(candles) < 2:
-        return None
-    return detect_single_day_disaster(
+        return ()
+    latest = candles[-1]
+    events: list[RiskEvent] = []
+    single = detect_single_day_disaster(
         symbol=symbol,
         previous_close=candles[-2].close_price,
-        current_close=candles[-1].close_price,
-        occurred_at=candles[-1].close_time,
+        current_close=latest.close_price,
+        occurred_at=latest.close_time,
         threshold_fraction=parameters.disaster_single_day_drop_fraction,
     )
+    if single is not None:
+        events.append(single)
+    multi = detect_multi_session_disaster(
+        symbol=symbol,
+        closes=tuple(candle.close_price for candle in candles),
+        occurred_at=latest.close_time,
+        sessions=parameters.disaster_multi_session_count,
+        threshold_fraction=parameters.disaster_multi_session_drop_fraction,
+    )
+    if multi is not None:
+        events.append(multi)
+    limit_day = detect_limit_day_open(
+        symbol=symbol,
+        prior_close=candles[-2].close_price,
+        open_price=latest.open_price,
+        occurred_at=latest.open_time,
+    )
+    if limit_day is not None:
+        events.append(limit_day)
+    return tuple(events)
 
 
 def _domain_positions(state: AccountState) -> tuple[Position, ...]:

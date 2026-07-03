@@ -11,10 +11,10 @@ data_source:
   # TWSE daily OHLCV is final around 17:30 Taipei (odd-lot + block volume);
   # the daily job never runs earlier than 18:00 Taipei.
   daily_job_time_taipei: "18:00"
-  # TWSE rate limits are undocumented; sequential requests spaced >= 3s
-  # avoid the community-reported IP bans.
-  min_request_interval_seconds: "3"
-  timeout_seconds: "10"
+  # STOCK_DAY family soft-bans after ~12-14 sequential requests (measured);
+  # spacing plus the client's penalty-box retries keep sweeps self-healing.
+  min_request_interval_seconds: "6"
+  timeout_seconds: "30"
   private_api_enabled: false
   api_key_required: false
 strategy:
@@ -47,22 +47,28 @@ risk:
   max_drawdown_fraction: "0.40"
   daily_loss_pause_fraction: "0.095"
   # Under the ±10% price limit a -20% day is impossible; -9% is limit-down
-  # territory (2025-04-07: 0050's first-ever limit-down close).
+  # territory (2025-04-07: 0050's first-ever limit-down close). The multi-
+  # session trigger catches limit-stretched slides (2025-04: ~-18% in 3 days).
   disaster_single_day_drop_fraction: "0.09"
+  disaster_multi_session_count: 3
+  disaster_multi_session_drop_fraction: "0.15"
   short_exposure_enabled: false
   margin_enabled: false
   leverage_enabled: false
 execution:
   mode: paper
-  # Interim flat-bps model. Goal TW-D introduces the full TW cost model:
-  # commission 0.1425%/side x broker discount with a minimum fee, sell-only
-  # transaction tax (ETF 0.1% / stock 0.3%), bracketed tick table.
-  fee_bps: "13.5"
+  # Effective commission/side = 14.25bps x 0.6 = 8.55bps, floored at NT$20.
+  commission_bps_ceiling: "14.25"
+  commission_discount: "0.6"
+  min_fee_twd: "20"
+  # Sell-only securities transaction tax (statutory; cost-stress reruns scale
+  # commission+slippage, never the tax). Tick sizes are price-bracketed and
+  # resolved by the execution layer, not configured.
+  sell_tax_bps_etf: "10"
+  sell_tax_bps_stock: "30"
   slippage_bps: "5"
   # Odd-lot share granularity; 0050 is the most-traded odd-lot name on TWSE.
   quantity_step: "1"
-  # ETF tick bracket at 0050's current price (>= NT$50).
-  price_tick: "0.05"
   real_orders_enabled: false
   private_api_enabled: false
   margin_enabled: false
@@ -71,6 +77,11 @@ account:
   account_id: paper-main
   initial_cash: "100000"
   quote_asset: TWD
+  # 二代健保: 2.11% withheld per dividend payment >= NT$20,000 — a 100k TWD
+  # scoreboard sits far below the threshold, so this stays off by default.
+  dividend_nhi_withholding_enabled: false
+  dividend_nhi_rate_bps: "211"
+  dividend_nhi_threshold_twd: "20000"
 runtime:
   mode: paper
   decision_timeframe: 1d

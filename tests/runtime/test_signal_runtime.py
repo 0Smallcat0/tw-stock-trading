@@ -23,7 +23,7 @@ _WARMUP = 200
 
 
 def _symbol(value: str, base_asset: str) -> Symbol:
-    return Symbol(value=value, base_asset=base_asset, quote_asset="USDT")
+    return Symbol(value=value, base_asset=base_asset, quote_asset="TWD")
 
 
 def _daily_candle(symbol: Symbol, index: int, close: Decimal, *, is_closed: bool = True) -> Candle:
@@ -53,36 +53,40 @@ def _series(scale: Decimal) -> tuple[Decimal, ...]:
 
 
 def _universe(days: int | None = None) -> dict[str, tuple[Candle, ...]]:
-    btc_prices = _series(Decimal("1"))
-    eth_prices = _series(Decimal("0.1"))
+    core_prices = _series(Decimal("1"))
+    second_prices = _series(Decimal("0.1"))
     if days is not None:
-        btc_prices = btc_prices[:days]
-        eth_prices = eth_prices[:days]
+        core_prices = core_prices[:days]
+        second_prices = second_prices[:days]
     return {
-        "BTCUSDT": tuple(
-            _daily_candle(_symbol("BTCUSDT", "BTC"), index, price)
-            for index, price in enumerate(btc_prices)
+        "0050": tuple(
+            _daily_candle(_symbol("0050", "0050"), index, price)
+            for index, price in enumerate(core_prices)
         ),
-        "ETHUSDT": tuple(
-            _daily_candle(_symbol("ETHUSDT", "ETH"), index, price)
-            for index, price in enumerate(eth_prices)
+        "0056": tuple(
+            _daily_candle(_symbol("0056", "0056"), index, price)
+            for index, price in enumerate(second_prices)
         ),
     }
 
 
 def _parameters() -> RuntimeParameters:
     return RuntimeParameters(
-        risk_budgets={"BTCUSDT": Decimal("0.5"), "ETHUSDT": Decimal("0.5")},
+        risk_budgets={"0050": Decimal("0.5"), "0056": Decimal("0.5")},
         initial_cash=Decimal("1000"),
         account_id="paper-main",
-        fee_bps=Decimal("10"),
+        commission_bps=Decimal("10"),
+        min_fee=Decimal("0"),
+        sell_tax_bps_etf=Decimal("0"),
+        sell_tax_bps_stock=Decimal("0"),
         slippage_bps=Decimal("5"),
         quantity_step=Decimal("0.000001"),
-        price_tick=Decimal("0.01"),
         min_notional_twd=Decimal("10"),
         max_drawdown_fraction=Decimal("0.20"),
         daily_loss_pause_fraction=Decimal("0.05"),
         disaster_single_day_drop_fraction=Decimal("0.20"),
+        disaster_multi_session_count=3,
+        disaster_multi_session_drop_fraction=Decimal("0.50"),
         stale_data_max_age_seconds=129600,
         idempotency_namespace="paper-runtime",
     )
@@ -111,8 +115,8 @@ def test_replay_notifies_ladder_changes_and_fills_the_scoreboard(tmp_path: Path)
     assert summary.final_equity is not None
     assert len(channel.delivered) == 4
     actions = {(event.symbol_value, event.action) for event in channel.delivered}
-    assert ("BTCUSDT", "INCREASE_EXPOSURE") in actions
-    assert ("BTCUSDT", "DECREASE_EXPOSURE") in actions
+    assert ("0050", "INCREASE_EXPOSURE") in actions
+    assert ("0050", "DECREASE_EXPOSURE") in actions
 
 
 def test_notifications_are_persisted_before_delivery(tmp_path: Path) -> None:
@@ -185,7 +189,7 @@ def test_stale_data_blocks_new_exposure_but_not_the_cycle(tmp_path: Path) -> Non
 
     # Next candle arrives, but we only observe it three days late: the pending
     # buy must be blocked while the cycle itself still runs.
-    late_observation = universe["BTCUSDT"][_WARMUP + 1].close_time + timedelta(days=3)
+    late_observation = universe["0050"][_WARMUP + 1].close_time + timedelta(days=3)
     second = runtime.process_closed_candles(
         {symbol: candles[: _WARMUP + 2] for symbol, candles in universe.items()},
         observed_at=late_observation,
@@ -201,9 +205,9 @@ def test_stale_data_blocks_new_exposure_but_not_the_cycle(tmp_path: Path) -> Non
 def test_open_candles_are_rejected(tmp_path: Path) -> None:
     runtime, _channel = _runtime(tmp_path / "events.jsonl")
     universe = _universe(days=_WARMUP + 1)
-    btc = universe["BTCUSDT"]
-    universe["BTCUSDT"] = btc[:-1] + (
-        _daily_candle(_symbol("BTCUSDT", "BTC"), _WARMUP, Decimal("200"), is_closed=False),
+    core = universe["0050"]
+    universe["0050"] = core[:-1] + (
+        _daily_candle(_symbol("0050", "0050"), _WARMUP, Decimal("200"), is_closed=False),
     )
 
     with pytest.raises(RuntimeEngineError, match="still-open"):

@@ -241,7 +241,12 @@ class VirtualOrder:
 
 @dataclass(frozen=True, slots=True)
 class VirtualFill:
-    """Simulated fill for a virtual order."""
+    """Simulated fill for a virtual order.
+
+    ``fee`` is the brokerage commission (minimum-fee floored). ``tax`` is the
+    sell-only securities transaction tax — itemized separately because it is
+    side- and instrument-dependent in Taiwan and must stay auditable.
+    """
 
     fill_id: str
     order_id: str
@@ -252,6 +257,7 @@ class VirtualFill:
     fee: Fee
     slippage: Money
     filled_at: datetime
+    tax: Fee = Decimal("0")
 
     def __post_init__(self) -> None:
         _require_non_empty("fill_id", self.fill_id)
@@ -262,6 +268,10 @@ class VirtualFill:
         _require_non_negative_decimal("fee", self.fee)
         _require_non_negative_decimal("slippage", self.slippage)
         _require_utc_datetime("filled_at", self.filled_at)
+        _require_non_negative_decimal("tax", self.tax)
+        if self.side is OrderSide.BUY and self.tax != Decimal("0"):
+            msg = "buy fills must not carry securities transaction tax"
+            raise DomainValidationError(msg)
 
 
 @dataclass(frozen=True, slots=True)

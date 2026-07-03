@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from src.domain import OrderIntent, OrderSide, RiskDecisionStatus, VirtualFill, VirtualOrder
+from src.execution.ticks import tw_instrument_type, tw_tick_for
 from src.execution.types import (
     BROKER_REJECTED_INSUFFICIENT_CASH,
     BROKER_REJECTED_INSUFFICIENT_HOLDINGS,
@@ -77,13 +78,15 @@ class PaperBroker:
                 reason_codes=(BROKER_REJECTED_NON_VIRTUAL_ORDER, *reason_codes),
             )
 
+        instrument_type = tw_instrument_type(order.intent.symbol.value)
+        price_tick = tw_tick_for(market_price.price, instrument_type)
         if order.risk_decision.status is not RiskDecisionStatus.APPROVED:
             reason_codes.append(BROKER_REJECTED_RISK_NOT_APPROVED)
         if order.risk_decision.intent != order.intent:
             reason_codes.append(BROKER_REJECTED_RISK_INTENT_MISMATCH)
         if market_price.symbol != order.intent.symbol:
             reason_codes.append(BROKER_REJECTED_SYMBOL_MISMATCH)
-        if not _is_multiple(market_price.price, self._parameters.price_tick):
+        if not _is_multiple(market_price.price, price_tick):
             reason_codes.append(BROKER_REJECTED_PRICE_TICK_VIOLATION)
 
         rounded_quantity = _round_down_to_step(
@@ -95,10 +98,17 @@ class PaperBroker:
         fill_price = _slippage_adjusted_price(
             side=order.intent.side,
             market_price=market_price.price,
+            price_tick=price_tick,
             parameters=self._parameters,
         )
         gross_notional = rounded_quantity * fill_price
-        fee = _fee_for(gross_notional, self._parameters)
+        fee = _commission_for(gross_notional, self._parameters)
+        tax = _sell_tax_for(
+            gross_notional,
+            side=order.intent.side,
+            instrument_type=instrument_type,
+            parameters=self._parameters,
+        )
         slippage = abs(fill_price - market_price.price) * rounded_quantity
 
         if gross_notional < self._parameters.min_notional:
@@ -136,6 +146,7 @@ class PaperBroker:
             fee=fee,
             slippage=slippage,
             filled_at=submitted_at,
+            tax=tax,
         )
         self._accepted_orders.append(accepted_order)
         self._fills.append(fill)
@@ -198,22 +209,34 @@ def _slippage_adjusted_price(
     *,
     side: OrderSide,
     market_price: Decimal,
+    price_tick: Decimal,
     parameters: PaperBrokerParameters,
 ) -> Decimal:
     multiplier = parameters.slippage_bps / _BPS_DENOMINATOR
     if side is OrderSide.BUY:
-        return _round_up_to_step(
-            market_price * (Decimal("1") + multiplier),
-            parameters.price_tick,
-        )
-    return _round_down_to_step(
-        market_price * (Decimal("1") - multiplier),
-        parameters.price_tick,
-    )
+        return _round_up_to_step(market_price * (Decimal("1") + multiplier), price_tick)
+    return _round_down_to_step(market_price * (Decimal("1") - multiplier), price_tick)
 
 
-def _fee_for(gross_notional: Decimal, parameters: PaperBrokerParameters) -> Decimal:
-    return gross_notional * parameters.fee_bps / _BPS_DENOMINATOR
+def _commission_for(gross_notional: Decimal, parameters: PaperBrokerParameters) -> Decimal:
+    """Per-side brokerage commission with the minimum-fee floor."""
+
+    commission = gross_notional * parameters.commission_bps / _BPS_DENOMINATOR
+    return max(commission, parameters.min_fee)
+
+
+def _sell_tax_for(
+    gross_notional: Decimal,
+    *,
+    side: OrderSide,
+    instrument_type: str,
+    parameters: PaperBrokerParameters,
+) -> Decimal:
+    """Securities transaction tax: SELL side only, rate by instrument type."""
+
+    if side is not OrderSide.SELL:
+        return Decimal("0")
+    return gross_notional * parameters.sell_tax_bps_for(instrument_type) / _BPS_DENOMINATOR
 
 
 def _position_quantity(account_view: BrokerAccountView, symbol_value: str) -> Decimal:

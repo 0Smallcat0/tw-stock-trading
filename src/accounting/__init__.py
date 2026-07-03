@@ -1,6 +1,6 @@
 """Virtual account ledger package for Core MVP accounting."""
 
-from src.accounting.ledger import VirtualAccountLedger
+from src.accounting.ledger import VirtualAccountLedger, nhi_withholding_for
 from src.accounting.types import (
     AccountingError,
     AccountingPosition,
@@ -16,4 +16,5 @@ __all__ = [
     "LedgerEvent",
     "LedgerEventType",
     "VirtualAccountLedger",
+    "nhi_withholding_for",
 ]

@@ -108,7 +108,9 @@ class DataSourceConfig(CoreConfigModel):
     backfill_provider: Literal["finmind_public"] = "finmind_public"
     daily_job_time_taipei: str = "18:00"
     min_request_interval_seconds: Decimal = Decimal("3")
-    timeout_seconds: Decimal = Decimal("10")
+    # Heavy report windows (TWT49U across a year) need generous read timeouts;
+    # observed live timeouts at 10s during long sequential sweeps.
+    timeout_seconds: Decimal = Decimal("30")
     private_api_enabled: bool = False
     api_key_required: bool = False
 
@@ -264,6 +266,8 @@ class RiskConfig(CoreConfigModel):
     max_drawdown_fraction: Decimal = Decimal("0.40")
     daily_loss_pause_fraction: Decimal = Decimal("0.095")
     disaster_single_day_drop_fraction: Decimal = Decimal("0.09")
+    disaster_multi_session_count: int = 3
+    disaster_multi_session_drop_fraction: Decimal = Decimal("0.15")
     short_exposure_enabled: bool = False
     margin_enabled: bool = False
     leverage_enabled: bool = False
@@ -273,15 +277,17 @@ class RiskConfig(CoreConfigModel):
     def _validate_min_notional(cls, value: Decimal) -> Decimal:
         return _require_positive_decimal("min_notional_twd", value)
 
-    @field_validator("stale_data_max_age_seconds")
+    @field_validator("stale_data_max_age_seconds", "disaster_multi_session_count")
     @classmethod
-    def _validate_stale_data_window(cls, value: int) -> int:
-        return _require_positive_int("stale_data_max_age_seconds", value)
+    def _validate_positive_ints(cls, value: int, info: object) -> int:
+        field_name = getattr(info, "field_name", "risk integer")
+        return _require_positive_int(str(field_name), value)
 
     @field_validator(
         "max_drawdown_fraction",
         "daily_loss_pause_fraction",
         "disaster_single_day_drop_fraction",
+        "disaster_multi_session_drop_fraction",
     )
     @classmethod
     def _validate_risk_fraction(cls, value: Decimal, info: object) -> Decimal:
@@ -296,34 +302,53 @@ class RiskConfig(CoreConfigModel):
 
 
 class ExecutionConfig(CoreConfigModel):
-    """Paper execution cost and rounding configuration.
+    """Paper execution cost and rounding configuration (TW cost model).
 
-    Interim flat-bps cost model: the full TW model (per-side commission with
-    broker discount and minimum fee, sell-only securities transaction tax by
-    instrument type, bracketed tick table) lands in Goal TW-D. Until then
-    fee_bps 13.5 approximates a 0.0855% commission per side plus the 0.1%
-    ETF sell tax averaged across the round trip; quantity_step 1 is odd-lot
-    share granularity; price_tick 0.05 is the ETF bracket at 0050's current
-    price (>= NT$50).
+    Commission: statutory ceiling 0.1425%/side × broker discount, floored by
+    a per-order minimum fee. Securities transaction tax hits SELLS only
+    (ETF 10bps / stock 30bps; statutory, so cost-stress reruns scale
+    commission+slippage, not the tax). Tick sizes are price-bracketed and
+    resolved dynamically by the execution layer — never configured.
+    quantity_step 1 = odd-lot share granularity (1000 = board-lot mode).
     """
 
     mode: Literal["paper"] = "paper"
-    fee_bps: Decimal = Decimal("13.5")
+    commission_bps_ceiling: Decimal = Decimal("14.25")
+    commission_discount: Decimal = Decimal("0.6")
+    min_fee_twd: Decimal = Decimal("20")
+    sell_tax_bps_etf: Decimal = Decimal("10")
+    sell_tax_bps_stock: Decimal = Decimal("30")
     slippage_bps: Decimal = Decimal("5")
     quantity_step: Decimal = Decimal("1")
-    price_tick: Decimal = Decimal("0.05")
     real_orders_enabled: bool = False
     private_api_enabled: bool = False
     margin_enabled: bool = False
     leverage_enabled: bool = False
 
-    @field_validator("fee_bps", "slippage_bps")
+    @property
+    def effective_commission_bps(self) -> Decimal:
+        """Per-side commission rate after the broker discount."""
+
+        return self.commission_bps_ceiling * self.commission_discount
+
+    @field_validator(
+        "commission_bps_ceiling",
+        "min_fee_twd",
+        "sell_tax_bps_etf",
+        "sell_tax_bps_stock",
+        "slippage_bps",
+    )
     @classmethod
-    def _validate_cost_bps(cls, value: Decimal, info: object) -> Decimal:
-        field_name = getattr(info, "field_name", "execution cost bps")
+    def _validate_cost_values(cls, value: Decimal, info: object) -> Decimal:
+        field_name = getattr(info, "field_name", "execution cost value")
         return _require_non_negative_decimal(str(field_name), value)
 
-    @field_validator("quantity_step", "price_tick")
+    @field_validator("commission_discount")
+    @classmethod
+    def _validate_commission_discount(cls, value: Decimal) -> Decimal:
+        return _require_fraction("commission_discount", value)
+
+    @field_validator("quantity_step")
     @classmethod
     def _validate_rounding_step(cls, value: Decimal, info: object) -> Decimal:
         field_name = getattr(info, "field_name", "execution rounding step")
@@ -342,11 +367,20 @@ class ExecutionConfig(CoreConfigModel):
 
 
 class VirtualAccountConfig(CoreConfigModel):
-    """Initial virtual account configuration."""
+    """Initial virtual account configuration.
+
+    NHI (二代健保) withholding defaults OFF: single dividend payments on a
+    100k TWD scoreboard sit far below the NT$20,000 per-payment threshold.
+    The per-payment rule was in force as of 2026-07 (annual-aggregation
+    reform suspended); revisit before Goal TW-H.
+    """
 
     account_id: str = "paper-main"
     initial_cash: Decimal = Decimal("100000")
     quote_asset: Literal["TWD"] = "TWD"
+    dividend_nhi_withholding_enabled: bool = False
+    dividend_nhi_rate_bps: Decimal = Decimal("211")
+    dividend_nhi_threshold_twd: Decimal = Decimal("20000")
 
     @field_validator("account_id")
     @classmethod
@@ -357,6 +391,12 @@ class VirtualAccountConfig(CoreConfigModel):
     @classmethod
     def _validate_initial_cash(cls, value: Decimal) -> Decimal:
         return _require_positive_decimal("initial_cash", value)
+
+    @field_validator("dividend_nhi_rate_bps", "dividend_nhi_threshold_twd")
+    @classmethod
+    def _validate_nhi_values(cls, value: Decimal, info: object) -> Decimal:
+        field_name = getattr(info, "field_name", "NHI value")
+        return _require_non_negative_decimal(str(field_name), value)
 
 
 class RuntimeConfig(CoreConfigModel):

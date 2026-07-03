@@ -66,7 +66,7 @@ def test_default_config_model_has_core_mvp_defaults() -> None:
     assert config.data_source.finmind_api_base_url == FINMIND_API_BASE_URL
     assert config.data_source.backfill_provider == "finmind_public"
     assert config.data_source.daily_job_time_taipei == "18:00"
-    assert config.data_source.timeout_seconds == Decimal("10")
+    assert config.data_source.timeout_seconds == Decimal("30")
     assert config.strategy.name == "daily_trend_ensemble"
     assert config.portfolio.risk_budgets == {"0050": Decimal("1")}
     assert "2330" not in config.portfolio.risk_budgets
@@ -91,8 +91,10 @@ def test_default_paper_runtime_config_loads_through_typed_model() -> None:
     assert config.portfolio.risk_budgets == {"0050": Decimal("1.0")}
     assert config.runtime.mode == "paper"
     assert config.runtime.decision_timeframe == "1d"
-    assert config.execution.fee_bps == Decimal("13.5")
-    assert config.execution.price_tick == Decimal("0.05")
+    assert config.execution.effective_commission_bps == Decimal("8.5500")
+    assert config.execution.min_fee_twd == Decimal("20")
+    assert config.execution.sell_tax_bps_etf == Decimal("10")
+    assert config.execution.sell_tax_bps_stock == Decimal("30")
 
 
 @pytest.mark.parametrize(
@@ -187,7 +189,7 @@ def test_config_file_values_override_model_defaults(tmp_path: Path) -> None:
     assert isinstance(runtime, dict)
 
     risk["min_notional_twd"] = "25000"
-    execution["fee_bps"] = "7.5"
+    execution["commission_discount"] = "0.28"
     runtime["idempotency_key_namespace"] = "tw-paper-runtime-test"
 
     config_path = tmp_path / "paper_runtime.yaml"
@@ -196,7 +198,7 @@ def test_config_file_values_override_model_defaults(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.risk.min_notional_twd == Decimal("25000")
-    assert config.execution.fee_bps == Decimal("7.5")
+    assert config.execution.effective_commission_bps == Decimal("14.25") * Decimal("0.28")
     assert config.runtime.idempotency_key_namespace == "tw-paper-runtime-test"
 
 
@@ -295,6 +297,8 @@ def test_legacy_crypto_config_fields_are_rejected() -> None:
         (("data_source", "rest_base_url_candidates"), ["https://api.binance.com"]),
         (("data_source", "ws_stream_base_url_candidates"), ["wss://stream.binance.com"]),
         (("strategy", "parameters"), {"momentum_lookback_candles": 12}),
+        (("execution", "fee_bps"), "10"),
+        (("execution", "price_tick"), "0.01"),
     ):
         with pytest.raises(ValidationError):
             AppConfig.model_validate(_with_nested_value(path, value))
@@ -309,6 +313,9 @@ def test_config_snapshot_is_json_serializable_and_writeable(tmp_path: Path) -> N
         "account_id": "paper-main",
         "initial_cash": "100000",
         "quote_asset": "TWD",
+        "dividend_nhi_withholding_enabled": False,
+        "dividend_nhi_rate_bps": "211",
+        "dividend_nhi_threshold_twd": "20000",
     }
 
     snapshot_path = write_config_snapshot(config, tmp_path / "config_snapshot.json")
