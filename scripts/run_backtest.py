@@ -155,9 +155,16 @@ def main() -> None:
 
 
 def _code_version() -> str:
+    """Short commit hash, suffixed ``-dirty`` when the working tree differs.
+
+    The registry's provenance is only as honest as this field: trials 2-5 were
+    recorded as ``472cb7f`` while running uncommitted engine fixes (see
+    docs/reports/TW_VERDICT_AUDIT_2026-07-04.md finding #1).
+    """
+
     try:
         output = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "describe", "--always", "--dirty"],
             capture_output=True,
             text=True,
             check=True,
@@ -165,7 +172,14 @@ def _code_version() -> str:
         )
     except (OSError, subprocess.SubprocessError):
         return "unknown"
-    return output.stdout.strip() or "unknown"
+    version = output.stdout.strip() or "unknown"
+    if version.endswith("-dirty"):
+        print(
+            "WARNING: running a registered trial on a DIRTY working tree; "
+            f"code_version recorded as {version}. Commit first for clean provenance.",
+            file=sys.stderr,
+        )
+    return version
 
 
 if __name__ == "__main__":

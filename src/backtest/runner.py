@@ -148,7 +148,9 @@ def run_registered_backtest(
         metrics=metrics,
         operator_note=operator_note,
     )
-    _write_trial_returns(registry_path, trial.trial_id, report)
+    _write_trial_returns(
+        registry_path, trial.trial_id, report, initial_cash=parameters.initial_cash
+    )
 
     report_path = Path(reports_directory) / f"trial-{trial.trial_id:06d}" / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,17 +177,32 @@ def _segment_metrics(
     segment_start: datetime,
     prefix: str,
 ) -> dict[str, str]:
-    """After-cost metrics restricted to equity points at or after segment_start."""
+    """After-cost metrics restricted to equity points at or after segment_start.
 
-    segment = [point for point in report.equity_curve if point.close_time >= segment_start]
+    The baseline is the last equity point BEFORE the segment when one exists:
+    the move from the boundary close into the first segment day is part of the
+    segment's lived experience and must not be dropped from a holdout verdict.
+    """
+
+    curve = report.equity_curve
+    first_index = next(
+        (index for index, point in enumerate(curve) if point.close_time >= segment_start),
+        len(curve),
+    )
+    segment = list(curve[first_index:])
     if len(segment) < 2:
         return {f"{prefix}observation_days": str(len(segment))}
-    baseline = segment[0].equity
+    if first_index > 0:
+        baseline = curve[first_index - 1].equity
+        points = segment
+    else:
+        baseline = segment[0].equity
+        points = segment[1:]
     returns: list[float] = []
     previous = baseline
     peak = baseline
     max_drawdown = Decimal("0")
-    for point in segment[1:]:
+    for point in points:
         if previous > Decimal("0"):
             returns.append(float(point.equity / previous) - 1.0)
         previous = point.equity
@@ -211,21 +228,29 @@ def _segment_metrics(
     }
 
 
-def _write_trial_returns(registry_path: str | Path, trial_id: int, report: BacktestReport) -> Path:
+def _write_trial_returns(
+    registry_path: str | Path,
+    trial_id: int,
+    report: BacktestReport,
+    *,
+    initial_cash: Decimal,
+) -> Path:
     """Persist the trial's daily return series next to the registry.
 
     Gate 3 (CSCV/PBO) and Gate 4 (DSR) need per-period returns for EVERY
     registered trial; bulk reports are gitignored, so this compact series is
-    the durable, committable input for the qualification math.
+    the durable, committable input for the qualification math. The series is
+    seeded from initial cash so the first execution day's return is included
+    and compounding reproduces final equity exactly.
     """
 
     returns_dir = Path(registry_path).parent / "trial_returns"
     returns_dir.mkdir(parents=True, exist_ok=True)
     returns: list[float] = []
     dates: list[str] = []
-    previous: Decimal | None = None
+    previous: Decimal = initial_cash
     for point in report.equity_curve:
-        if previous is not None and previous > Decimal("0"):
+        if previous > Decimal("0"):
             returns.append(float(point.equity / previous) - 1.0)
             dates.append(point.close_time.date().isoformat())
         previous = point.equity

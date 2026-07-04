@@ -45,8 +45,13 @@ class PBOResult:
     observations: int
 
 
-def sharpe_ratio(returns: list[float], *, periods_per_year: int = 365) -> float:
-    """Annualized Sharpe ratio of a periodic return series (risk-free = 0)."""
+def sharpe_ratio(returns: list[float], *, periods_per_year: int) -> float:
+    """Annualized Sharpe ratio of a periodic return series (risk-free = 0).
+
+    ``periods_per_year`` has NO default on purpose: TW trades ~246 days/year,
+    not 365 — a silent calendar-day default is exactly the trial-2 mistake.
+    Derive it from the data span like the engine does.
+    """
 
     if len(returns) < 2:
         return 0.0
@@ -204,7 +209,7 @@ def _column_sharpe(rows: list[list[float]], column: int) -> float:
 
 
 def non_annualized_sharpe_variance(
-    annualized_sharpes: list[float], *, periods_per_year: int = 365
+    annualized_sharpes: list[float], *, periods_per_year: int
 ) -> float:
     """De-annualize registry Sharpe values into the variance DSR expects.
 
