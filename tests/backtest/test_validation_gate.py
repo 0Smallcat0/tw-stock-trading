@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -36,7 +37,8 @@ def _returns_with_drift() -> list[float]:
 
 
 def test_sharpe_ratio_of_constant_returns_is_zero() -> None:
-    assert sharpe_ratio([0.01] * 50) == 0.0
+    # periods_per_year is intentionally required: TW trades ~246 days/year.
+    assert sharpe_ratio([0.01] * 50, periods_per_year=246) == 0.0
 
 
 def test_deflated_sharpe_shrinks_as_trials_accumulate() -> None:
@@ -309,12 +311,12 @@ def test_non_annualized_sharpe_variance_deannualizes_registry_values() -> None:
     from src.backtest import non_annualized_sharpe_variance
 
     annualized = [1.02, 0.96, -0.37]
-    variance = non_annualized_sharpe_variance(annualized)
+    variance = non_annualized_sharpe_variance(annualized, periods_per_year=246)
 
     import statistics
 
-    assert variance == pytest.approx(statistics.pvariance(annualized) / 365)
-    assert non_annualized_sharpe_variance([1.0]) == 0.0
+    assert variance == pytest.approx(statistics.pvariance(annualized) / 246)
+    assert non_annualized_sharpe_variance([1.0], periods_per_year=246) == 0.0
 
 
 def test_dsr_raises_instead_of_fabricating_certainty_on_extreme_inputs(
@@ -370,7 +372,17 @@ def test_registered_run_persists_a_durable_returns_series(tmp_path: Path) -> Non
     assert returns_path.exists()
     payload = json_module.loads(returns_path.read_text(encoding="utf-8"))
     assert payload["trial_id"] == result.trial.trial_id
-    assert len(payload["daily_returns"]) == result.report.metrics.observation_days - 1
+    # The series must include the FIRST execution day (seeded from initial
+    # cash), so compounding reproduces final equity exactly — these files are
+    # the durable gate 3/4 inputs and must match the ledger.
+    assert len(payload["daily_returns"]) == result.report.metrics.observation_days
+    first_curve_day = result.report.equity_curve[0].close_time.date().isoformat()
+    assert payload["first_return_date"] == first_curve_day
+    compounded = 1.0
+    for daily_return in payload["daily_returns"]:
+        compounded *= 1.0 + daily_return
+    final_over_initial = float(result.report.metrics.final_equity) / 1000.0
+    assert abs(compounded - final_over_initial) < 1e-9
 
 
 def test_holdout_spend_registers_isolated_holdout_segment_metrics(tmp_path: Path) -> None:
@@ -392,3 +404,67 @@ def test_holdout_spend_registers_isolated_holdout_segment_metrics(tmp_path: Path
     assert int(metrics["holdout_observation_days"]) > 300
     assert "holdout_annualized_sharpe" in metrics
     assert "holdout_max_drawdown_fraction" in metrics
+
+
+def _uptrend_universe_with_boundary_crash(
+    days: int, crash_index: int
+) -> dict[str, tuple[Candle, ...]]:
+    """Rising prices so the strategy is fully invested, then one -15% day.
+
+    The crash lands exactly on the first holdout day, so a segment metric that
+    drops the boundary day would report a near-zero holdout drawdown.
+    """
+
+    def candles(symbol: Symbol) -> tuple[Candle, ...]:
+        result = []
+        price = Decimal("100")
+        for index in range(days):
+            if index < crash_index:
+                price = (Decimal("100") * (Decimal("1.005") ** index)).quantize(Decimal("0.01"))
+            elif index == crash_index:
+                price = (price * Decimal("0.85")).quantize(Decimal("0.01"))
+            open_time = _BASE_OPEN_TIME + timedelta(days=index)
+            result.append(
+                Candle(
+                    symbol=symbol,
+                    timeframe=Timeframe("1d"),
+                    open_time=open_time,
+                    close_time=open_time + timedelta(days=1) - timedelta(milliseconds=1),
+                    open_price=price,
+                    high_price=price + Decimal("1"),
+                    low_price=price - Decimal("1"),
+                    close_price=price,
+                    volume=Decimal("1000"),
+                    is_closed=True,
+                )
+            )
+        return tuple(result)
+
+    return {
+        "0050": candles(Symbol(value="0050", base_asset="BTC", quote_asset="TWD")),
+        "0056": candles(Symbol(value="0056", base_asset="ETH", quote_asset="TWD")),
+    }
+
+
+def test_holdout_segment_includes_the_boundary_day_move(tmp_path: Path) -> None:
+    # 620 daily closes; holdout = last 365 days => first holdout point is the
+    # close at index 254, which is exactly the -15% crash day below. Synthetic
+    # prices are not TWSE-tick-aligned, so tick enforcement is off (the
+    # adjusted-series gate path runs with it off as well).
+    universe = _uptrend_universe_with_boundary_crash(620, crash_index=254)
+    qualification = run_registered_backtest(
+        universe,
+        parameters=replace(_parameters(), enforce_price_tick=False),
+        config_hash="hash-a",
+        code_version="abc1234",
+        registry_path=tmp_path / "registry.jsonl",
+        holdout_path=tmp_path / "holdout.json",
+        reports_directory=tmp_path / "reports",
+        recorded_at=_NOW,
+        spend_holdout_single_use=True,
+    )
+
+    metrics = qualification.trial.metrics
+    # The boundary-day crash belongs to the holdout verdict: measured from the
+    # last pre-holdout close, the drawdown must show the -15% day.
+    assert Decimal(metrics["holdout_max_drawdown_fraction"]) > Decimal("0.10")
