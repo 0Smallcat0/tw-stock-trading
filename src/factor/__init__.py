@@ -20,6 +20,7 @@ from src.factor.lowvol import (
     month_end_dates,
     run_backtest,
     select_holdings,
+    select_schedule,
     simulate,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "month_end_dates",
     "run_backtest",
     "select_holdings",
+    "select_schedule",
     "simulate",
 ]
