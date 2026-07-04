@@ -102,7 +102,35 @@ MaxDD 32.47%——C1 仍勉強通過（≤33.45%）、C2 更遠。
 | 3 | trial 2 之 ×2 成本壓力 | 期末 184,011 |
 | 4 | **修正交易日年化（裁決基礎）** | 上表全貌 |
 | 5 | trial 4 之 ×2 成本壓力 | 期末 184,011、MaxDD 32.47% |
+| 6 | 閒置現金 1.5%/年敏感度（審計後補跑，見附錄 B） | 期末 306,768、CAGR 5.43%、MaxDD 25.19%；C2 仍 FAIL（−1.79pp） |
 
-Registry：`docs/reports/research/trial_registry.jsonl`（N=5）；
+Registry：`docs/reports/research/trial_registry.jsonl`（N=6）；
 日報酬序列：`docs/reports/research/trial_returns/`；
 holdout 鎖：`docs/reports/research/holdout_lock.json`（未動用）。
+
+---
+
+## 附錄 B：對抗性審計後補充（2026-07-04，裁決不變）
+
+本報告發布同日接受獨立對抗性審計（`TW_VERDICT_AUDIT_2026-07-04.md`：
+全量重放重現、成本反事實掃描、benchmark 外部錨定 0.0pp）——**FAIL 成立**。
+以下為審計要求的揭露與後續處置：
+
+1. **登記跨度偏離計畫文本（揭露）**：計畫預登 trial #1 為「2008-01 起」，
+   實跑為全史 2004-04-15 起（operator_note 有記 "full history"，本報告初版
+   未明示）。審計以 trial-4 序列重裁計畫跨度：2008-01 起策略 CAGR 5.98% vs
+   門檻 7.45% → C2 仍 FAIL；且 **2004–2020 任一起始年 C2 全數 FAIL**
+   （缺口 −1.47 ～ −4.28pp）。跨度選擇不影響結論。
+2. **閒置現金敏感度（補跑）**：閘門契約要求的 1.5%/年閒置現金敏感度原未
+   執行，已以 trial 6 補跑（乾淨工作樹 `3eed5c7`）：CAGR 4.91% → 5.43%，
+   距 C2 門檻仍 −1.79pp。**FAIL 對現金收益假設不敏感。**
+3. **工件修復**：`_write_trial_returns` 漏首日報酬的缺陷已修
+   （commit `3eed5c7`，同 crypto 姊妹修復 `6804d3f`）；trial 1-5 序列檔已從
+   完整報告回填，全部複利重現 registry 期末權益（相對誤差 ≤3e-15）。
+   裁決頭條數字不受影響（引擎自始由初始資金起算）。
+4. **Provenance 加固**：trial 2-5 曾於髒工作樹執行（code_version 欄位記為
+   472cb7f 但含未提交引擎修正；重現性已由審計全量重放外部補齊）。
+   `run_backtest.py` 現改用 `git describe --dirty` 並於髒樹時警告；
+   trial 6 起 provenance 乾淨。
+5. **年化防呆**：`validation.py` 的 `periods_per_year` 由預設 365 改為必填
+   （台股 ≈246 交易日；trial 2 的年化錯誤不再可能默默重演）。
