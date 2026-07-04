@@ -52,6 +52,11 @@ class PaperBrokerParameters:
     private_api_enabled: bool = False
     margin_enabled: bool = False
     leverage_enabled: bool = False
+    # Exchange ticks exist on RAW prices only. Adjusted-series replays set
+    # this False and use the adjusted-price quantum (1e-6) instead: factor-
+    # scaled prices are intentionally off-tick and validating them against
+    # bracket ticks rejects every order (observed on trial #1).
+    enforce_price_tick: bool = True
 
     def __post_init__(self) -> None:
         _require_non_negative_decimal("commission_bps", self.commission_bps)

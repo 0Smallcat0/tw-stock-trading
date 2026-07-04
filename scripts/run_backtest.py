@@ -20,7 +20,12 @@ from src.backtest import (
     trial_count,
 )
 from src.config import config_snapshot, load_config
-from src.data import MarketDataValidationError, candle_file_name, read_candles_jsonl
+from src.data import (
+    MarketDataValidationError,
+    adjusted_candle_file_name,
+    candle_file_name,
+    read_candles_jsonl,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,9 +42,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--note", default="", help="Operator note recorded in the trial registry.")
     parser.add_argument(
+        "--series",
+        choices=("adjusted", "raw"),
+        default="adjusted",
+        help=(
+            "Price series to replay. 'adjusted' (default) is the dividend/split-"
+            "adjusted series — total-return-correct signals AND benchmark; "
+            "'raw' exists only for diagnostics and is NOT gate-valid."
+        ),
+    )
+    parser.add_argument(
+        "--cash-yield-bps",
+        default="0",
+        help="Annualized idle-cash yield in bps (sensitivity assumption; default 0).",
+    )
+    parser.add_argument(
         "--cost-stress",
         action="store_true",
-        help="Run with doubled fee and slippage assumptions (gate stress rerun).",
+        help="Run with doubled commission and slippage assumptions (gate stress rerun).",
     )
     parser.add_argument(
         "--spend-holdout",
@@ -70,8 +90,12 @@ def main() -> None:
 
     candles_by_symbol = {}
     for symbol_value in sorted(config.portfolio.risk_budgets):
-        file_path = candles_dir / candle_file_name(symbol_value, timeframe_value)
-        candles_by_symbol[symbol_value] = read_candles_jsonl(file_path)
+        name = (
+            adjusted_candle_file_name(symbol_value, timeframe_value)
+            if args.series == "adjusted"
+            else candle_file_name(symbol_value, timeframe_value)
+        )
+        candles_by_symbol[symbol_value] = read_candles_jsonl(candles_dir / name)
 
     parameters = BacktestParameters(
         risk_budgets=config.portfolio.risk_budgets,
@@ -91,8 +115,13 @@ def main() -> None:
         disaster_multi_session_drop_fraction=config.risk.disaster_multi_session_drop_fraction,
         stale_data_max_age_seconds=config.risk.stale_data_max_age_seconds,
         cost_multiplier=Decimal("2") if args.cost_stress else Decimal("1"),
+        cash_yield_annual_bps=Decimal(args.cash_yield_bps),
+        enforce_price_tick=args.series == "raw",
     )
 
+    note = args.note or ""
+    series_note = f"series={args.series}"
+    operator_note = f"{note} [{series_note}]".strip() if note else series_note
     result = run_registered_backtest(
         candles_by_symbol,
         parameters=parameters,
@@ -102,7 +131,7 @@ def main() -> None:
         holdout_path=config.storage.holdout_lock_path,
         reports_directory=config.storage.backtest_reports_directory,
         recorded_at=datetime.now(UTC),
-        operator_note=args.note,
+        operator_note=operator_note,
         spend_holdout_single_use=args.spend_holdout,
     )
 

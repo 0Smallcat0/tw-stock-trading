@@ -299,6 +299,36 @@ class VirtualAccountLedger:
         )
         return self._state
 
+    def credit_cash_interest(
+        self,
+        *,
+        amount: Decimal,
+        occurred_at: datetime,
+        mark_prices: Mapping[Symbol, Decimal],
+    ) -> AccountState:
+        """Credit idle-cash interest (backtest sensitivity assumption)."""
+
+        _require_non_negative_decimal("amount", amount)
+        if amount == Decimal("0"):
+            return self._state
+        self._append_event(
+            event_type=LedgerEventType.CASH_CHANGED,
+            occurred_at=occurred_at,
+            reason_codes=("INTEREST_CREDITED",),
+            cash_delta=amount,
+        )
+        self._state = _marked_state(
+            account_id=self._state.account_id,
+            cash=self._state.cash + amount,
+            positions=self._state.positions,
+            realized_pnl=self._state.realized_pnl,
+            updated_at=occurred_at,
+            previous_peak_equity=self._state.peak_equity,
+            mark_prices=mark_prices,
+            dividends_receivable=self._state.dividends_receivable,
+        )
+        return self._state
+
     def _position_for(self, symbol: Symbol) -> AccountingPosition | None:
         for position in self._state.positions:
             if position.symbol.value == symbol.value:

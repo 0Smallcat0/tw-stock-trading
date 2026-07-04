@@ -165,3 +165,19 @@ def test_split_rejects_fractional_share_results() -> None:
             occurred_at=_OPENED_AT + timedelta(days=1),
             mark_prices={_SYMBOL: Decimal("200")},
         )
+
+
+def test_cash_interest_credit_is_audited() -> None:
+    ledger = _ledger_with_position()
+    before = ledger.state.cash
+
+    state = ledger.credit_cash_interest(
+        amount=Decimal("12.34"),
+        occurred_at=_OPENED_AT + timedelta(days=5),
+        mark_prices={_SYMBOL: Decimal("100")},
+    )
+
+    assert state.cash == before + Decimal("12.34")
+    last = ledger.events[-1]
+    assert last.event_type is LedgerEventType.CASH_CHANGED
+    assert last.reason_codes == ("INTEREST_CREDITED",)

@@ -116,7 +116,10 @@ def run_registered_backtest(
         "rejected_count": str(report.metrics.rejected_count),
         "annualized_turnover": str(report.metrics.annualized_turnover),
         "total_traded_notional": str(report.metrics.total_traded_notional),
+        "total_fees": str(report.metrics.total_fees),
+        "total_taxes": str(report.metrics.total_taxes),
         "benchmark_final_equity": str(report.metrics.benchmark_final_equity),
+        "benchmark_max_drawdown_fraction": str(report.metrics.benchmark_max_drawdown_fraction),
         "observation_days": str(report.metrics.observation_days),
     }
     if spend_holdout_single_use:
@@ -135,6 +138,7 @@ def run_registered_backtest(
         parameters={
             **_ENSEMBLE_PARAMETERS,
             "cost_multiplier": str(parameters.cost_multiplier),
+            "cash_yield_annual_bps": str(parameters.cash_yield_annual_bps),
             "holdout_spend": str(spend_holdout_single_use),
         },
         universe=tuple(sorted(parameters.risk_budgets)),
@@ -189,10 +193,13 @@ def _segment_metrics(
         if peak > Decimal("0"):
             max_drawdown = max(max_drawdown, (peak - point.equity) / peak)
     sharpe = 0.0
-    if len(returns) >= 2:
+    span_days = (segment[-1].close_time - segment[0].close_time).days
+    span_years = span_days / 365.25 if span_days > 0 else 0.0
+    periods_per_year = len(segment) / span_years if span_years > 0 else 0.0
+    if len(returns) >= 2 and periods_per_year > 0.0:
         stdev = statistics.stdev(returns)
         if stdev > 0.0:
-            sharpe = statistics.fmean(returns) / stdev * math.sqrt(365)
+            sharpe = statistics.fmean(returns) / stdev * math.sqrt(periods_per_year)
     total_return = (
         segment[-1].equity / baseline - Decimal("1") if baseline > Decimal("0") else Decimal("0")
     )

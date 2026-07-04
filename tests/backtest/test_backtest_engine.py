@@ -202,3 +202,25 @@ def test_simultaneous_full_budget_buys_fit_costs_inside_the_ladder_claim() -> No
     assert costs[1] - costs[0] < Decimal("1")
     # No hidden shortfall: nothing was rejected on the buy day.
     assert not report.risk_rejections
+
+
+def test_benchmark_max_drawdown_is_reported() -> None:
+    report = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
+
+    # The crash from 223 to 100 hits the buy-and-hold benchmark directly.
+    assert report.metrics.benchmark_max_drawdown_fraction > Decimal("0.5")
+    assert report.metrics.total_taxes >= Decimal("0")
+
+
+def test_cash_yield_credits_interest_on_idle_cash() -> None:
+    from dataclasses import replace
+
+    base = run_backtest(_trend_and_crash_universe(), parameters=_parameters())
+    with_yield = run_backtest(
+        _trend_and_crash_universe(),
+        parameters=replace(_parameters(), cash_yield_annual_bps=Decimal("150")),
+    )
+
+    # The account idles half its budget in cash through the warmup-adjacent
+    # days and returns fully to cash after the crash: yield must help.
+    assert with_yield.metrics.final_equity > base.metrics.final_equity
