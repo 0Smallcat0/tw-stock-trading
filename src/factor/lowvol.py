@@ -155,11 +155,17 @@ def _metrics_at_month_ends(
     close = series.close
     turnover = series.turnover
     clip = parameters.return_clip
-    returns: list[float] = [0.0]  # returns[i] aligns to dates[i]; index 0 unused
-    for i in range(1, len(close)):
+    n = len(close)
+    # Clipped daily returns as prefix sums so a windowed sample variance is O(1)
+    # instead of an O(lookback) stdev at every month-end (the hot path).
+    prefix = [0.0] * n
+    prefix_sq = [0.0] * n
+    for i in range(1, n):
         prev = close[i - 1]
         raw = (close[i] / prev - 1.0) if prev > 0.0 else 0.0
-        returns.append(max(-clip, min(clip, raw)))
+        r = clip if raw > clip else (-clip if raw < -clip else raw)
+        prefix[i] = prefix[i - 1] + r
+        prefix_sq[i] = prefix_sq[i - 1] + r * r
 
     look = parameters.lookback_days
     liq_win = parameters.liquidity_window
@@ -169,9 +175,14 @@ def _metrics_at_month_ends(
             continue
         if i < look or i < liq_win - 1 or close[i] <= 0.0:
             continue
-        window = returns[i - look + 1 : i + 1]
-        vol = statistics.stdev(window)
-        liq = statistics.median(turnover[i - liq_win + 1 : i + 1])
+        # sample variance (ddof=1) of returns[i-look+1 .. i] via prefix sums
+        total = prefix[i] - prefix[i - look]
+        total_sq = prefix_sq[i] - prefix_sq[i - look]
+        var = (total_sq - total * total / look) / (look - 1)
+        vol = var**0.5 if var > 0.0 else 0.0
+        window = sorted(turnover[i - liq_win + 1 : i + 1])
+        mid = liq_win // 2
+        liq = window[mid] if liq_win % 2 else (window[mid - 1] + window[mid]) / 2.0
         out[day] = (vol, close[i], liq)
     return out
 
