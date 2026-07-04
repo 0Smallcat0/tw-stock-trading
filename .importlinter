@@ -30,6 +30,27 @@ source_modules =
     src.data
 forbidden_modules =
     src.config
+    src.leverage
+    src.features
+    src.strategies
+    src.portfolio
+    src.risk
+    src.execution
+    src.accounting
+    src.monitoring
+    src.notify
+    src.backtest
+    src.runtime
+    src.api
+    scripts
+
+[importlinter:contract:leverage_boundary]
+name = Leverage research composes data only and must not touch trading or orchestration layers
+type = forbidden
+source_modules =
+    src.leverage
+forbidden_modules =
+    src.config
     src.features
     src.strategies
     src.portfolio
@@ -50,6 +71,7 @@ source_modules =
     src.config
 forbidden_modules =
     src.data
+    src.leverage
     src.features
     src.strategies
     src.portfolio
