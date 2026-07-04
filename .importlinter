@@ -64,6 +64,26 @@ forbidden_modules =
     src.api
     scripts
 
+[importlinter:contract:factor_boundary]
+name = Factor research composes data only and must not touch trading or orchestration layers
+type = forbidden
+source_modules =
+    src.factor
+forbidden_modules =
+    src.config
+    src.features
+    src.strategies
+    src.portfolio
+    src.risk
+    src.execution
+    src.accounting
+    src.monitoring
+    src.notify
+    src.backtest
+    src.runtime
+    src.api
+    scripts
+
 [importlinter:contract:config_boundary]
 name = Config must not import runtime or business implementation packages
 type = forbidden
