@@ -38,6 +38,12 @@ class BacktestParameters:
     disaster_multi_session_drop_fraction: Decimal
     stale_data_max_age_seconds: int
     cost_multiplier: Decimal = Decimal("1")
+    # Annualized yield credited on idle cash (sensitivity assumption; the
+    # registered primary claim is adjudicated at 0).
+    cash_yield_annual_bps: Decimal = Decimal("0")
+    # False for adjusted-series replays: factor-scaled prices are
+    # intentionally off-tick (trial #1 proved enforcing rejects everything).
+    enforce_price_tick: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.risk_budgets, Mapping) or not self.risk_budgets:
@@ -106,7 +112,14 @@ class EquityPoint:
 
 @dataclass(frozen=True, slots=True)
 class BacktestMetrics:
-    """Headline after-cost metrics for one replay."""
+    """Headline after-cost metrics for one replay.
+
+    Benchmark fields describe budget-weighted buy-and-hold on the SAME input
+    series from the first execution open (on the adjusted series this is
+    total-return buy-and-hold — the mandatory TW comparison), charged no
+    entry commission: a slightly flattered benchmark is the honest direction
+    for a drawdown-reduction claim.
+    """
 
     final_equity: Decimal
     total_return_fraction: Decimal
@@ -115,10 +128,12 @@ class BacktestMetrics:
     trade_count: int
     rejected_count: int
     total_fees: Decimal
+    total_taxes: Decimal
     total_slippage: Decimal
     total_traded_notional: Decimal
     annualized_turnover: Decimal
     benchmark_final_equity: Decimal
+    benchmark_max_drawdown_fraction: Decimal
     observation_days: int
 
 
@@ -242,10 +257,14 @@ class BacktestReport:
                 "trade_count": self.metrics.trade_count,
                 "rejected_count": self.metrics.rejected_count,
                 "total_fees": str(self.metrics.total_fees),
+                "total_taxes": str(self.metrics.total_taxes),
                 "total_slippage": str(self.metrics.total_slippage),
                 "total_traded_notional": str(self.metrics.total_traded_notional),
                 "annualized_turnover": str(self.metrics.annualized_turnover),
                 "benchmark_final_equity": str(self.metrics.benchmark_final_equity),
+                "benchmark_max_drawdown_fraction": str(
+                    self.metrics.benchmark_max_drawdown_fraction
+                ),
                 "observation_days": self.metrics.observation_days,
             },
             "cost_assumptions": dict(self.cost_assumptions),

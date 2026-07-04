@@ -111,6 +111,7 @@ def run_backtest(
             slippage_bps=parameters.effective_slippage_bps,
             quantity_step=parameters.quantity_step,
             min_notional=parameters.min_notional_twd,
+            enforce_price_tick=parameters.enforce_price_tick,
         )
     )
     gate_parameters = RiskGateParameters(
@@ -130,6 +131,7 @@ def run_backtest(
     order_sequence = 0
     start_of_day_equity = parameters.initial_cash
     benchmark_open_prices: dict[str, Decimal] | None = None
+    previous_execution_time: datetime | None = None
 
     for decision_time in decision_times:
         decisions: dict[str, DailyTrendEnsembleDecision] = {}
@@ -184,6 +186,22 @@ def run_backtest(
         if benchmark_open_prices is None:
             benchmark_open_prices = dict(open_prices)
         execution_time = next(iter(execution_candles.values())).open_time
+        if parameters.cash_yield_annual_bps > Decimal("0") and previous_execution_time is not None:
+            elapsed_days = (execution_time - previous_execution_time).days
+            if elapsed_days > 0 and ledger.state.cash > Decimal("0"):
+                interest = (
+                    ledger.state.cash
+                    * parameters.cash_yield_annual_bps
+                    / _BPS
+                    * Decimal(elapsed_days)
+                    / Decimal(_DAYS_PER_YEAR)
+                )
+                ledger.credit_cash_interest(
+                    amount=interest,
+                    occurred_at=execution_time,
+                    mark_prices=_mark_prices(open_prices, symbols),
+                )
+        previous_execution_time = execution_time
         equity_at_open = _equity_at(ledger, open_prices)
 
         ordered_symbols = sorted(
@@ -336,7 +354,7 @@ def _execute_ladder_change(
         )
         estimated_fill_price = _round_up(
             reference_price * (Decimal("1") + parameters.effective_slippage_bps / _BPS),
-            tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
+            _effective_tick(reference_price, symbol.value, parameters),
         )
         target_quantity = _round_down(
             intended_notional / cost_rate / reference_price, parameters.quantity_step
@@ -380,7 +398,7 @@ def _execute_ladder_change(
             symbol=symbol,
             status="TRADING",
             is_spot_trading_allowed=True,
-            price_tick_size=tw_tick_for(reference_price, tw_instrument_type(symbol.value)),
+            price_tick_size=_effective_tick(reference_price, symbol.value, parameters),
             quantity_step_size=parameters.quantity_step,
             min_quantity=parameters.quantity_step,
             min_notional=parameters.min_notional_twd,
@@ -561,6 +579,14 @@ def _mark_prices(
     return {symbols[symbol_value]: price for symbol_value, price in prices.items()}
 
 
+def _effective_tick(price: Decimal, symbol_value: str, parameters: BacktestParameters) -> Decimal:
+    """Bracket tick on raw prices; the adjusted-price quantum otherwise."""
+
+    if parameters.enforce_price_tick:
+        return tw_tick_for(price, tw_instrument_type(symbol_value))
+    return Decimal("0.000001")
+
+
 def _benchmark_equity(
     parameters: BacktestParameters,
     benchmark_open_prices: Mapping[str, Decimal],
@@ -603,13 +629,22 @@ def _metrics(
             daily_returns.append(float(point.equity / previous_equity) - 1.0)
         previous_equity = point.equity
 
+    # TW has ~247 TRADING days per calendar year; annualization derives the
+    # actual periods-per-year from the curve's calendar span instead of the
+    # crypto edition's 365-bars-per-year assumption.
+    span_years = 0.0
+    if len(equity_curve) >= 2:
+        span_days = (equity_curve[-1].close_time - equity_curve[0].close_time).days
+        span_years = span_days / 365.25
+    periods_per_year = len(equity_curve) / span_years if span_years > 0 else 0.0
+
     annualized_sharpe = Decimal("0")
-    if len(daily_returns) >= 2:
+    if len(daily_returns) >= 2 and periods_per_year > 0.0:
         mean_return = statistics.fmean(daily_returns)
         stdev_return = statistics.stdev(daily_returns)
         if stdev_return > 0.0:
             annualized_sharpe = Decimal(
-                str(round(mean_return / stdev_return * math.sqrt(_DAYS_PER_YEAR), 6))
+                str(round(mean_return / stdev_return * math.sqrt(periods_per_year), 6))
             )
 
     max_drawdown = Decimal("0")
@@ -619,20 +654,32 @@ def _metrics(
         if peak > Decimal("0"):
             max_drawdown = max(max_drawdown, (peak - point.equity) / peak)
 
+    max_benchmark_drawdown = Decimal("0")
+    benchmark_peak = parameters.initial_cash
+    for point in equity_curve:
+        benchmark_peak = max(benchmark_peak, point.benchmark_equity)
+        if benchmark_peak > Decimal("0"):
+            max_benchmark_drawdown = max(
+                max_benchmark_drawdown,
+                (benchmark_peak - point.benchmark_equity) / benchmark_peak,
+            )
+
     total_fees = Decimal("0")
+    total_taxes = Decimal("0")
     total_slippage = Decimal("0")
     total_traded_notional = Decimal("0")
     for fill in fills:
         total_fees += fill.fee
+        total_taxes += fill.tax
         total_slippage += fill.slippage
         total_traded_notional += fill.quantity * fill.price
 
     annualized_turnover = Decimal("0")
-    if equity_curve:
+    if equity_curve and span_years > 0:
         mean_equity = sum((point.equity for point in equity_curve), Decimal("0")) / Decimal(
             len(equity_curve)
         )
-        years = Decimal(len(equity_curve)) / Decimal(_DAYS_PER_YEAR)
+        years = Decimal(str(round(span_years, 6)))
         if mean_equity > Decimal("0") and years > Decimal("0"):
             annualized_turnover = total_traded_notional / mean_equity / years
 
@@ -644,9 +691,11 @@ def _metrics(
         trade_count=len(fills),
         rejected_count=rejected_count,
         total_fees=total_fees,
+        total_taxes=total_taxes,
         total_slippage=total_slippage,
         total_traded_notional=total_traded_notional,
         annualized_turnover=annualized_turnover,
         benchmark_final_equity=benchmark_final,
+        benchmark_max_drawdown_fraction=max_benchmark_drawdown,
         observation_days=len(equity_curve),
     )

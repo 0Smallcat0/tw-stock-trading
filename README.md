@@ -23,11 +23,17 @@ Design decisions are grounded in verified research:
 `docs/plans/TW_STOCK_VERSION_PLAN.md`. Work queue: `GOALS.md`.
 Qualification standard: `docs/contracts/VALIDATION_GATE_CONTRACT.md`.
 
-## Status
+## Status — VERDICT: FAIL (2026-07-04); the honest answer is buy-and-hold
 
-Goal TW-A (bootstrap) done: crypto-specific code removed, TW identity and
-contracts in place, baseline green. The TWSE/FinMind data layer, trading
-calendar, and corporate-action adjustment pipeline land in Goals TW-B/TW-C.
+TW-A..TW-E complete. The registered in-sample adjudication on 21.2 years of
+real 0050 total-return data REJECTED the pre-registered claim: drawdown
+protection is real (26.3% vs 55.8%) but the CAGR cost is 5.3pp/yr — beyond
+the 3pp tolerance (49 ladder changes/yr of whipsaw). Per the pre-registered
+stop rule the runtime was never built. Full numbers:
+`docs/reports/TW_QUALIFICATION_VERDICT.md`. The data pipeline, adjustment
+factors, validation-gate tooling, and TW cost model remain reusable for any
+future pre-registered experiment; the holdout (2025-07+) is still locked and
+unspent.
 
 ## Local Setup
 

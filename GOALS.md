@@ -350,18 +350,26 @@ registered trial that adjudicates the primary claim in-sample.
   2023-2026 segments; 2025-04 crash reconstruction (exit/re-entry dates and
   net effect).
 
-### Done When
+### Done When (verified 2026-07-04 — VERDICT: FAIL)
 
-- registry has trial #1 (N=1) with benchmark metrics recorded
-- holdout lock proven single-use by test
-- report adjudicates the primary claim in-sample honestly
-- **if the claim fails in-sample: skip TW-F, write the FAIL report
-  (TW-H procedure), and stop — do not build runtime for a dead strategy**
-- baseline verification passes
+- registry holds N=5 trials (defective + superseded trials retained,
+  append-only); holdout locked at 2025-07-03, UNSPENT
+- trial #4 (corrected trading-day annualization) adjudicated the
+  pre-registered claim in-sample:
+  C1 MaxDD 26.32% <= 33.45% PASS · C2 CAGR 4.91% vs floor 7.21% FAIL
+  -> overall FAIL (49 ladder changes/yr whipsaw; costs+timing each cost
+  ~2.6pp/yr; see docs/reports/TW_QUALIFICATION_VERDICT.md)
+- per the pre-registered rule: TW-F/TW-G are NOT BUILT; the FAIL report is
+  the system's final product; the honest answer is 0050 buy-and-hold
+- baseline verification passes (350 tests)
 
 ---
 
-## Goal TW-F: Runtime + Notifications + Dashboard
+## Goal TW-F: Runtime + Notifications + Dashboard — CLOSED, NOT BUILT
+
+Closed 2026-07-04 by the TW-E pre-registered stop rule: the primary claim
+failed in-sample, so no runtime exists to run. The sections below are kept
+for the record of what WOULD have been built.
 
 ### Why
 
@@ -391,9 +399,9 @@ scoreboard honest — through holidays, typhoons, and suspensions.
 
 ---
 
-## Goal TW-G: TW Core MVP Complete
+## Goal TW-G: TW Core MVP Complete — CLOSED WITH TW-F
 
-### Done When (all on real 0050 data)
+### Done When (all on real 0050 data; not applicable after the TW-E verdict)
 
 1. baseline verification passes
 2. daily public data ingested, reconciled, and replayed
@@ -410,7 +418,13 @@ scoreboard honest — through holidays, typhoons, and suspensions.
 
 ---
 
-## Goal TW-H: Signal-Live Qualification
+## Goal TW-H: Signal-Live Qualification — ADJUDICATED EARLY (FAIL, IN-SAMPLE)
+
+The verdict report exists (docs/reports/TW_QUALIFICATION_VERDICT.md,
+2026-07-04): the claim failed in-sample at trial #4, so the qualification
+never reached PBO/DSR/holdout/paper stages. The holdout stays LOCKED and
+unspent — clean for any future pre-registered variant. The FAIL report is a
+successful outcome of the process.
 
 ### Why
 

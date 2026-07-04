@@ -30,6 +30,10 @@ from src.execution.types import (
 )
 
 _BPS_DENOMINATOR = Decimal("10000")
+# Matches src.data.adjustments.adjusted_price quantization: every adjusted
+# price is a multiple of this quantum, so tick math stays exact when the
+# bracket-tick check is disabled for adjusted-series replays.
+_ADJUSTED_PRICE_QUANTUM = Decimal("0.000001")
 
 
 class PaperBroker:
@@ -79,7 +83,11 @@ class PaperBroker:
             )
 
         instrument_type = tw_instrument_type(order.intent.symbol.value)
-        price_tick = tw_tick_for(market_price.price, instrument_type)
+        price_tick = (
+            tw_tick_for(market_price.price, instrument_type)
+            if self._parameters.enforce_price_tick
+            else _ADJUSTED_PRICE_QUANTUM
+        )
         if order.risk_decision.status is not RiskDecisionStatus.APPROVED:
             reason_codes.append(BROKER_REJECTED_RISK_NOT_APPROVED)
         if order.risk_decision.intent != order.intent:
