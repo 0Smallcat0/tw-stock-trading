@@ -81,7 +81,7 @@ docker compose config
 
 The local database service uses dummy development credentials only:
 
-- Host port: `54321` (54320 belongs to the crypto sibling project)
+- Host port: `54321`
 - Database: `tw_quant`
 - User: `tw`
 - Password: `tw_dev_only`
