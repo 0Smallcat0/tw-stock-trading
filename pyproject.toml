@@ -7,6 +7,7 @@ name = "tw-stock-trading"
 version = "0.1.0"
 description = "TW stock long-only daily signal MVP with a paper scoreboard."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic",

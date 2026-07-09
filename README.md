@@ -23,6 +23,27 @@ Design decisions are grounded in verified research:
 `docs/plans/TW_STOCK_VERSION_PLAN.md`. Work queue: `GOALS.md`.
 Qualification standard: `docs/contracts/VALIDATION_GATE_CONTRACT.md`.
 
+## What this project demonstrates
+
+- **Research integrity over a good-looking result.** The primary claim was
+  *pre-registered* before any backtest; overfitting is controlled with a
+  single-use locked holdout, a full trial registry (every run counts toward
+  N), CSCV/PBO, and a Deflated Sharpe Ratio. The verdict is a documented
+  **FAIL** — the honest engineering outcome, not a curve-fit win.
+- **Lookahead-bias discipline.** Dual-series rule (features read
+  dividend/split-adjusted prices; accounting reads raw), next-trading-day
+  execution, 200-close warmup, and explicit stop conditions against future
+  data — enforced by golden tests.
+- **Taiwan market realism.** Corporate-action adjustment factors from official
+  rows, ROC date parsing (three boundary formats), a calendar that models
+  typhoon days / make-up-workdays / multi-session halts, and a TW cost model
+  (commission floor, sell-side tax by instrument, tick-bracket rounding).
+- **Enforced architecture.** Layered `domain → data → features → strategy →
+  portfolio → risk → execution → accounting`, with boundaries checked by
+  import-linter, `mypy --strict`, and ruff. ~40 test modules.
+- **Safe by construction.** Keyless public data only — no broker API, no
+  credentials, no real orders, ever, by product definition.
+
 ## Status — VERDICT: FAIL (2026-07-04); the honest answer is buy-and-hold
 
 TW-A..TW-E complete. The registered in-sample adjudication on 21.2 years of
@@ -66,3 +87,7 @@ The local database service uses dummy development credentials only:
 - Password: `tw_dev_only`
 
 These are local Docker credentials, not production secrets.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
