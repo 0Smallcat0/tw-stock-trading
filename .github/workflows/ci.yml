@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]" -c requirements/constraints-dev.txt
+
+      - name: Ruff lint
+        run: python -m ruff check .
+
+      - name: Ruff format
+        run: python -m ruff format --check .
+
+      - name: Mypy (strict)
+        run: python -m mypy --strict src/
+
+      - name: Import-linter (layer boundaries)
+        run: lint-imports
+
+      - name: Pytest (offline suite)
+        run: python -m pytest -m "not network" tests -q
+
+      - name: Docker compose config
+        run: docker compose config
