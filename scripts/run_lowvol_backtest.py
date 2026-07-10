@@ -279,8 +279,7 @@ def main() -> None:
     calendar = market_calendar(raw_map)
     end = max(d for d in calendar if d < HOLDOUT)
     print(
-        f"universe: {len(raw_map)} stocks | "
-        f"calendar {calendar[0]}..{calendar[-1]} | adj end {end}"
+        f"universe: {len(raw_map)} stocks | calendar {calendar[0]}..{calendar[-1]} | adj end {end}"
     )
 
     configs = build_configs()
@@ -348,8 +347,7 @@ def main() -> None:
     print("\n=== ADJUDICATION ===")
     print(f"F1 CAGR  {pr.cagr:.4%} >= {bench.cagr:.4%} : {'PASS' if f1 else 'FAIL'}")
     print(
-        f"F2 MaxDD {pr.max_drawdown:.2%} <= {bench.max_drawdown:.2%} : "
-        f"{'PASS' if f2 else 'FAIL'}"
+        f"F2 MaxDD {pr.max_drawdown:.2%} <= {bench.max_drawdown:.2%} : {'PASS' if f2 else 'FAIL'}"
     )
     print(f"PBO {pbo.pbo:.3f} <= 0.05 : {'PASS' if pbo.pbo <= 0.05 else 'FAIL'}")
     print(f"DSR {dsr_value:.3f} >= 0.95 : {'PASS' if dsr_value >= 0.95 else 'FAIL'}")
@@ -357,8 +355,21 @@ def main() -> None:
 
     if not args.no_register:
         register_trials(configs, results, bench, pbo.pbo, dsr_value, len(raw_map), calendar, end)
-    write_report(configs, results, bench, pr, f1, f2, pbo.pbo, dsr_value, verdict,
-                 len(raw_map), len(held), calendar, end)
+    write_report(
+        configs,
+        results,
+        bench,
+        pr,
+        f1,
+        f2,
+        pbo.pbo,
+        dsr_value,
+        verdict,
+        len(raw_map),
+        len(held),
+        calendar,
+        end,
+    )
     print(f"\nreport -> {REPORT}")
 
 
