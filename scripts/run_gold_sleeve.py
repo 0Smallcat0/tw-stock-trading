@@ -25,7 +25,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from src.backtest import BacktestParameters, config_hash_for, run_registered_backtest
+from src.backtest import (
+    BacktestParameters,
+    EquityPoint,
+    config_hash_for,
+    run_registered_backtest,
+)
 from src.config import config_snapshot, load_config
 from src.data import candle_file_name, read_candles_jsonl
 
@@ -87,17 +92,16 @@ def _buy_and_hold(closes: list[Decimal]) -> dict[str, str]:
     }
 
 
-def _worst_single_day(equity_curve: list[dict[str, object]]) -> dict[str, str]:
+def _worst_single_day(equity_curve: tuple[EquityPoint, ...]) -> dict[str, str]:
     worst = 0.0
     worst_at = ""
-    previous: float | None = None
+    previous: Decimal | None = None
     for point in equity_curve:
-        equity = float(str(point["equity"]))
         if previous is not None and previous > 0:
-            move = 1.0 - equity / previous
+            move = 1.0 - float(point.equity / previous)
             if move > worst:
-                worst, worst_at = move, str(point["close_time"])[:10]
-        previous = equity
+                worst, worst_at = move, point.close_time.date().isoformat()
+        previous = point.equity
     return {"worst_single_day_drop": f"{worst:.6f}", "on": worst_at}
 
 
@@ -168,8 +172,6 @@ def main() -> None:
         for candle in candles
         if result.report.data_start <= candle.close_time <= result.report.data_end
     ]
-    payload = json.loads(json.dumps(result.report.as_dict(), default=str))
-    curve = payload.get("report", payload)["equity_curve"]
     print(
         json.dumps(
             {
@@ -183,7 +185,12 @@ def main() -> None:
                     "final_equity": str(metrics.final_equity),
                     "trade_count": str(metrics.trade_count),
                 },
-                "brake_check": _worst_single_day(curve),
+                "brake_check": {
+                    **_worst_single_day(result.report.equity_curve),
+                    # The pre-registration requires proof that no brake shaped
+                    # the result. An empty risk_events tuple is that proof.
+                    "risk_events": str(len(result.report.risk_events)),
+                },
                 "buy_and_hold_gld": _buy_and_hold(window_closes),
             },
             indent=2,

@@ -32,6 +32,36 @@ _ENSEMBLE_PARAMETERS = {
 }
 
 
+def registry_parameters(parameters: BacktestParameters) -> dict[str, str]:
+    """What actually ran, not what usually runs.
+
+    The registry is this program's overfitting ledger. Until 2026-07-26 it
+    stamped the SMA ensemble's lookbacks onto every row, so the Donchian
+    runs (trials 23 and 24) are on record describing a strategy they did not
+    execute. Rows are append-only and those two stay wrong; every row after
+    this describes its own run.
+    """
+
+    shared = {
+        "fill_rule": "next_bar_open",
+        "cost_multiplier": str(parameters.cost_multiplier),
+        "cash_yield_annual_bps": str(parameters.cash_yield_annual_bps),
+    }
+    if parameters.strategy_name == "donchian_breakout_ensemble":
+        return {
+            **shared,
+            "dc_windows": ",".join(str(window) for window in parameters.dc_windows),
+            "dc_exit": parameters.dc_exit,
+            "dc_atr_window": str(parameters.dc_atr_window),
+            "dc_atr_multiple": str(parameters.dc_atr_multiple),
+        }
+    return {
+        **shared,
+        "lookbacks": _ENSEMBLE_PARAMETERS["lookbacks"],
+        "ladder": _ENSEMBLE_PARAMETERS["ladder"],
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class RegisteredBacktestResult:
     """Everything one registered run produced."""
@@ -53,7 +83,7 @@ def run_registered_backtest(
     reports_directory: str | Path,
     recorded_at: datetime,
     operator_note: str = "",
-    strategy_id: str = "daily_trend_ensemble",
+    strategy_id: str | None = None,
     spend_holdout_single_use: bool = False,
 ) -> RegisteredBacktestResult:
     """Run one backtest under gate rules: lock, trim, register, report.
@@ -134,11 +164,9 @@ def run_registered_backtest(
         recorded_at=recorded_at,
         config_hash=config_hash,
         code_version=code_version,
-        strategy_id=strategy_id,
+        strategy_id=strategy_id or parameters.strategy_name,
         parameters={
-            **_ENSEMBLE_PARAMETERS,
-            "cost_multiplier": str(parameters.cost_multiplier),
-            "cash_yield_annual_bps": str(parameters.cash_yield_annual_bps),
+            **registry_parameters(parameters),
             "holdout_spend": str(spend_holdout_single_use),
         },
         universe=tuple(sorted(parameters.risk_budgets)),
