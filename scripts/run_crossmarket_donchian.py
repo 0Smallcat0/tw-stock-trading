@@ -137,7 +137,7 @@ def main() -> None:
 
     metrics = result.report.metrics
     window_closes = [
-        candle.close
+        candle.close_price
         for candle in candles
         if result.report.data_start <= candle.close_time <= result.report.data_end
     ]
