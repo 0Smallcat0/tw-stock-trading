@@ -126,7 +126,11 @@ def main() -> None:
         sell_tax_bps_stock=Decimal("0"),
         slippage_bps=SLIPPAGE_BPS,
         quantity_step=Decimal("1"),
-        min_notional_twd=Decimal("0"),
+        # The pre-registration declares "no lot minimum to clear"; the paper
+        # broker refuses a non-positive floor, so this is the smallest value
+        # that expresses the same thing. One share of GLD has never been
+        # worth less than $40, so it cannot reject a trade.
+        min_notional_twd=Decimal("0.01"),
         max_drawdown_fraction=MAX_DRAWDOWN_FRACTION,
         daily_loss_pause_fraction=DAILY_LOSS_PAUSE_FRACTION,
         disaster_single_day_drop_fraction=DISASTER_SINGLE_DAY_DROP,
