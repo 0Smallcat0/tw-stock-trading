@@ -28,7 +28,7 @@ from src.data import (
     write_backfill_artifacts,
     write_calendar_json,
 )
-from src.domain import Symbol, taipei_date
+from src.domain import Candle, Symbol, taipei_date
 
 _DEFAULT_START = date(2003, 1, 1)
 _TWT49U_FLOOR = date(2003, 5, 5)
@@ -37,6 +37,12 @@ _TWT49U_FLOOR = date(2003, 5, 5)
 # invisible to this pipeline — irrelevant for 0050 (no such events), but a
 # documented limitation for any future stock symbol.
 _RESUMPTION_REPORTS_FLOOR = date(2011, 1, 1)
+
+
+# Market-wide corporate actions occur most trading days, so a cache whose
+# newest event is older than this cannot be trusted to describe the recent
+# window — and an unexempted halt there blocks the entire write.
+_CORPORATE_ACTIONS_MAX_STALENESS_DAYS = 7
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +61,15 @@ def parse_args() -> argparse.Namespace:
         "--end",
         default=None,
         help="Backfill end date (ISO). Default: today's Taipei date.",
+    )
+    parser.add_argument(
+        "--refresh-corporate-actions",
+        action="store_true",
+        help=(
+            "Re-fetch the corporate-action cache even when it looks fresh. "
+            "The cache is refreshed automatically once it lags the requested "
+            f"end date by more than {_CORPORATE_ACTIONS_MAX_STALENESS_DAYS} days."
+        ),
     )
     return parser.parse_args()
 
@@ -87,10 +102,32 @@ def main() -> int:
         corporate_actions_cache = (
             Path(config.storage.candle_files_directory) / "corporate_actions_all.json"
         )
-        if corporate_actions_cache.exists():
-            events = read_adjustment_factors(corporate_actions_cache)
-            print(f"[corporate-actions] loaded {len(events)} cached event(s)")
+        cached_events = (
+            read_adjustment_factors(corporate_actions_cache)
+            if corporate_actions_cache.exists()
+            else ()
+        )
+        newest_cached = max((event.effective_date for event in cached_events), default=None)
+        newest_text = newest_cached.isoformat() if newest_cached is not None else "empty"
+        cache_is_fresh = (
+            newest_cached is not None
+            and (end - newest_cached).days <= _CORPORATE_ACTIONS_MAX_STALENESS_DAYS
+        )
+        if cached_events and cache_is_fresh and not args.refresh_corporate_actions:
+            events = cached_events
+            print(f"[corporate-actions] loaded {len(events)} cached event(s) through {newest_text}")
         else:
+            if cached_events:
+                # A stale cache silently hides every halt and distribution
+                # after its last event, which makes the quality check fail
+                # with a GAP it can never exempt — and then NOTHING is
+                # written, freezing the whole series at the cache's date.
+                reason = (
+                    "forced refresh"
+                    if args.refresh_corporate_actions
+                    else f"cache ends {newest_text}, {end.isoformat()} requested"
+                )
+                print(f"[corporate-actions] refreshing ({reason})")
             print(f"[corporate-actions] fetching {_TWT49U_FLOOR} -> {end}")
             events = _fetch_corporate_actions(twse, end=end)
             write_adjustment_factors(events, corporate_actions_cache)
@@ -130,6 +167,17 @@ def main() -> int:
             spliced = reconcile_and_splice(
                 finmind_candles=finmind_candles, twse_candles=twse_candles
             )
+            verified_suspensions = _dually_silent_dates(
+                trading_dates=trading_dates,
+                finmind_candles=finmind_candles,
+                twse_candles=twse_candles,
+            )
+            if verified_suspensions:
+                print(
+                    f"[{symbol_value}] verified suspension(s) "
+                    f"{', '.join(day.isoformat() for day in verified_suspensions)}: "
+                    "both sources silent while the market was open"
+                )
             coverage = spliced.overlap_days / max(1, len(spliced.candles))
             print(
                 f"[{symbol_value}] verified {spliced.overlap_days} day(s) exactly against "
@@ -146,6 +194,7 @@ def main() -> int:
                 candles_directory=config.storage.candle_files_directory,
                 adjustments_directory=config.storage.candle_files_directory,
                 overlap_days=spliced.overlap_days,
+                verified_suspensions=verified_suspensions,
             )
             print(
                 f"[{symbol_value}] wrote {artifacts.candle_count} candles -> "
@@ -153,6 +202,38 @@ def main() -> int:
                 f"{artifacts.factors_path.name}"
             )
     return 0
+
+
+def _dually_silent_dates(
+    *,
+    trading_dates: tuple[date, ...],
+    finmind_candles: tuple[Candle, ...],
+    twse_candles: tuple[Candle, ...],
+) -> tuple[date, ...]:
+    """Open-market days where BOTH sources have no bar for this symbol.
+
+    A single source going quiet is a fetch problem. Two independent
+    sources going quiet on the same day, while both are alive on days
+    either side of it, is the symbol not trading — a suspension that the
+    corporate-action feed does not always carry (0050 on 2026-07-10 is
+    the case that exposed this).
+
+    The inside-the-covered-range requirement is the guard: it makes a
+    wholesale fetch failure impossible to mistake for a halt, because a
+    failed fetch has no bars after the gap to bracket it.
+    """
+
+    finmind_days = {candle.trading_date for candle in finmind_candles if candle.trading_date}
+    twse_days = {candle.trading_date for candle in twse_candles if candle.trading_date}
+    if not finmind_days or not twse_days:
+        return ()
+    lower = max(min(finmind_days), min(twse_days))
+    upper = min(max(finmind_days), max(twse_days))
+    return tuple(
+        day
+        for day in sorted(trading_dates)
+        if lower < day < upper and day not in finmind_days and day not in twse_days
+    )
 
 
 def _build_calendar(

@@ -103,15 +103,18 @@ def write_backfill_artifacts(
     candles_directory: str | Path,
     adjustments_directory: str | Path,
     overlap_days: int,
+    verified_suspensions: tuple[date, ...] = (),
 ) -> BackfillArtifacts:
     """Quality-check the spliced series, then persist raw + adjusted + factors.
 
     Gap checking exempts corporate-action halt windows (e.g. the 0050
-    2025-06 split halt); any OTHER issue fails the backfill loudly.
+    2025-06 split halt) plus any caller-supplied verified suspensions —
+    days both independent sources agree the symbol did not trade while
+    the market was open. Any OTHER issue fails the backfill loudly.
     """
 
     symbol_events = tuple(event for event in events if event.symbol_value == symbol.value)
-    halt_dates = suspension_dates(candles, symbol_events, calendar)
+    halt_dates = tuple(suspension_dates(candles, symbol_events, calendar)) + verified_suspensions
     report = inspect_daily_candle_quality(
         candles,
         calendar=calendar,
