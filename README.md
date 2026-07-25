@@ -49,13 +49,29 @@ Full adjudication: [`docs/reports/TW_QUALIFICATION_VERDICT.md`](docs/reports/TW_
        src="docs/assets/trial4_exposure_light.png">
 </picture>
 
-## Three pre-registered experiments, three honest verdicts
+## Four pre-registered experiments, four honest verdicts
 
 | Route | Pre-registered claim | Verdict | Decisive evidence |
 | --- | --- | --- | --- |
 | **TW** — trend-ensemble exposure ladder on 0050 | MaxDD ≤ 60% × B&H **and** CAGR ≥ B&H − 3pp | **FAIL** | Drawdown 26.3% vs 55.8% ✓, but CAGR −5.3pp ✗ (whipsaw) |
 | **TW2** — leveraged ETF (00631L) 50/50 + cash, quarterly rebalance | CAGR ≥ B&H **and** MaxDD ≤ B&H | **FAIL** | −1.69pp/yr CAGR **and** deeper drawdown (56.0% vs 55.8%, incl. synthetic 2008) |
 | **TW4** — low-volatility factor over a 2,150-stock survivorship-mitigated universe | CAGR ≥ B&H, MaxDD ≤ B&H, PBO ≤ 0.05, DSR ≥ 0.95 | **FAIL** | CAGR 8.08% vs 10.82%; CSCV/PBO = 0.115 flagged the only Sharpe-winning configs as parameter-unstable |
+| **XM** — the [sibling crypto program](https://github.com/0Smallcat0/crypto-quant-signal)'s best candidate, run here **unchanged** | Sharpe > B&H **and** MaxDD < B&H | **DID NOT TRANSFER** | Sharpe −0.31 vs 0.72; 100k TWD became 66,330 while 0050 rose 687% |
+
+The fourth verdict is the most useful one this repository has produced, and
+it is about the other repository. That program searched 133 registered
+trials and found a configuration that cleared its deflation gate and a full
+robustness battery. Run here **with zero re-tuning**, it lost money over 21
+years in a market that rose 687%. The two arms differ in one parameter — an
+exit rule worth **+0.06 Sharpe in crypto and −0.73 here**. That parameter
+encoded a property of crypto, not a truth about trend following.
+
+What did survive the crossing: the *untuned* mid-channel variant is positive
+in both markets (+0.43 here across 21 years, cutting drawdown from 55.8% to
+30.9%), and the two markets' daily returns correlate **−0.004**. A fixed
+50/50 combination of the same rule in both — no parameter chosen anywhere —
+beats either sleeve on Sharpe. Details:
+[`CROSSMARKET_DONCHIAN_RESULT.md`](docs/research/CROSSMARKET_DONCHIAN_RESULT.md).
 
 The failures are complementary, which is the finding: routes that beat the
 benchmark's return blow through its drawdown (TW2), and routes that contain
