@@ -44,8 +44,35 @@ class BacktestParameters:
     # False for adjusted-series replays: factor-scaled prices are
     # intentionally off-tick (trial #1 proved enforcing rejects everything).
     enforce_price_tick: bool = True
+    # Cross-market validation of the crypto program's trial 118
+    # (docs/research/CROSSMARKET_DONCHIAN_PREREGISTRATION.md). Every value
+    # is copied from that trial and may not be tuned on Taiwan data.
+    strategy_name: str = "daily_trend_ensemble"
+    dc_windows: tuple[int, ...] = ()
+    dc_exit: str = "atr_channel"
+    dc_atr_window: int = 14
+    dc_atr_multiple: Decimal = Decimal("2")
 
     def __post_init__(self) -> None:
+        if self.strategy_name not in ("daily_trend_ensemble", "donchian_breakout_ensemble"):
+            msg = f"unknown backtest strategy_name: {self.strategy_name}"
+            raise BacktestError(msg)
+        if self.strategy_name == "donchian_breakout_ensemble":
+            if len(self.dc_windows) != 4 or len(set(self.dc_windows)) != 4:
+                msg = "dc_windows must contain exactly four distinct channel windows"
+                raise BacktestError(msg)
+            if any(window < 2 for window in self.dc_windows):
+                msg = "dc_windows entries must each be at least 2"
+                raise BacktestError(msg)
+            if self.dc_exit not in ("half_low", "mid_channel", "atr_channel"):
+                msg = "dc_exit must be 'half_low', 'mid_channel', or 'atr_channel'"
+                raise BacktestError(msg)
+            if self.dc_atr_window < 2:
+                msg = "dc_atr_window must be at least 2"
+                raise BacktestError(msg)
+            if self.dc_atr_multiple <= Decimal("0"):
+                msg = "dc_atr_multiple must be positive"
+                raise BacktestError(msg)
         if not isinstance(self.risk_budgets, Mapping) or not self.risk_budgets:
             msg = "risk_budgets must be a non-empty mapping"
             raise BacktestError(msg)

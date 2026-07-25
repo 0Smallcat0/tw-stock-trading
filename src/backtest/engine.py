@@ -53,7 +53,11 @@ from src.risk import (
     detect_single_day_disaster,
     evaluate_order_intent,
 )
-from src.strategies import DailyTrendEnsembleDecision, evaluate_daily_trend_ensemble
+from src.strategies import (
+    DailyTrendEnsembleDecision,
+    evaluate_daily_trend_ensemble,
+    evaluate_donchian_ensemble,
+)
 
 _BPS = Decimal("10000")
 _DAYS_PER_YEAR = 365
@@ -65,6 +69,24 @@ ZERO_QUANTITY_AFTER_ROUNDING = "ZERO_QUANTITY_AFTER_ROUNDING"
 _NON_RETRIABLE_REJECTION_CODES = frozenset(
     {MIN_NOTIONAL_NOT_MET, EXCHANGE_MIN_NOTIONAL_NOT_MET, ZERO_QUANTITY_AFTER_ROUNDING}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _SizedDecision:
+    """Non-ladder strategy output carrying only what the target builder and
+    execution path consume.
+
+    The DailyTrendEnsembleDecision type pins its exposure to five rungs and
+    carries sub-signal provenance that a channel-breakout strategy does not
+    have. Rather than fake those fields, the Donchian path emits this
+    narrower structure, which satisfies LadderDecisionLike.
+    """
+
+    symbol: Symbol
+    exposure_fraction: Decimal
+    reason_codes: tuple[str, ...]
+    generated_at_bar_close: datetime
+    executable_from_next_bar: datetime
 
 
 def run_backtest(
@@ -133,14 +155,41 @@ def run_backtest(
     benchmark_open_prices: dict[str, Decimal] | None = None
     previous_execution_time: datetime | None = None
 
+    donchian_states: dict[str, tuple[bool, ...]] = {}
     for decision_time in decision_times:
-        decisions: dict[str, DailyTrendEnsembleDecision] = {}
+        decisions: dict[str, DailyTrendEnsembleDecision | _SizedDecision] = {}
         for symbol_value in sorted(symbols):
             snapshot = snapshot_lookup[symbol_value][decision_time]
-            decision = evaluate_daily_trend_ensemble(
-                snapshot,
-                previous_fraction=previous_decision_fraction[symbol_value],
-            )
+            decision: DailyTrendEnsembleDecision | _SizedDecision
+            if parameters.strategy_name == "donchian_breakout_ensemble":
+                candle_index = candle_lookup[symbol_value][decision_time]
+                fraction, dc_codes, donchian_states[symbol_value] = evaluate_donchian_ensemble(
+                    candles_by_symbol[symbol_value],
+                    candle_index,
+                    windows=parameters.dc_windows,
+                    exit_mode=parameters.dc_exit,
+                    previous_states=donchian_states.get(symbol_value),
+                    atr_window=parameters.dc_atr_window,
+                    atr_multiple=parameters.dc_atr_multiple,
+                )
+                next_index = candle_index + 1
+                executable = (
+                    candles_by_symbol[symbol_value][next_index].open_time
+                    if next_index < len(candles_by_symbol[symbol_value])
+                    else decision_time
+                )
+                decision = _SizedDecision(
+                    symbol=symbols[symbol_value],
+                    exposure_fraction=fraction,
+                    reason_codes=dc_codes,
+                    generated_at_bar_close=decision_time,
+                    executable_from_next_bar=executable,
+                )
+            else:
+                decision = evaluate_daily_trend_ensemble(
+                    snapshot,
+                    previous_fraction=previous_decision_fraction[symbol_value],
+                )
             decisions[symbol_value] = decision
             previous_decision_fraction[symbol_value] = decision.exposure_fraction
             signals.append(
@@ -212,7 +261,8 @@ def run_backtest(
             ),
         )
         for symbol_value in ordered_symbols:
-            decision = decisions[symbol_value]
+            sized_decision: DailyTrendEnsembleDecision | _SizedDecision = decisions[symbol_value]
+            decision = sized_decision
             desired_fraction = decision.exposure_fraction
             if desired_fraction == executed_fraction[symbol_value]:
                 continue
@@ -310,7 +360,7 @@ def _execute_ladder_change(
     gate_parameters: RiskGateParameters,
     parameters: BacktestParameters,
     symbol: Symbol,
-    decision: DailyTrendEnsembleDecision,
+    decision: DailyTrendEnsembleDecision | _SizedDecision,
     desired_fraction: Decimal,
     current_fraction: Decimal,
     budget: Decimal,

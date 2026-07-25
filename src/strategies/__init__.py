@@ -8,6 +8,10 @@ from src.strategies.daily_trend_ensemble import (
     LADDER_UP,
     evaluate_daily_trend_ensemble,
 )
+from src.strategies.donchian_breakout_ensemble import (
+    average_true_range,
+    evaluate_donchian_ensemble,
+)
 from src.strategies.types import (
     ALLOWED_EXPOSURE_FRACTIONS,
     DailyTrendEnsembleDecision,
@@ -18,6 +22,8 @@ from src.strategies.types import (
 
 __all__ = [
     "ALLOWED_EXPOSURE_FRACTIONS",
+    "average_true_range",
+    "evaluate_donchian_ensemble",
     "DAILY_TREND_ENSEMBLE_LOOKBACKS",
     "DAILY_TREND_ENSEMBLE_TIMEFRAME",
     "DailyTrendEnsembleDecision",
