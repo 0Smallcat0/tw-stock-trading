@@ -11,6 +11,8 @@ New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 $log = Join-Path $runDir "tw_shadow_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
 & ".venv\Scripts\python.exe" -m scripts.ingest_public_ohlcv *> $log
-"ingest exit=$LASTEXITCODE" | Add-Content $log
+"ingest 0050 exit=$LASTEXITCODE" | Add-Content $log
+& ".venv\Scripts\python.exe" -m scripts.ingest_us_etf_ohlcv *>> $log
+"ingest GLD exit=$LASTEXITCODE" | Add-Content $log
 & ".venv\Scripts\python.exe" -m scripts.shadow_signal_tw *>> $log
 "shadow exit=$LASTEXITCODE finished=$(Get-Date -Format o)" | Add-Content $log
