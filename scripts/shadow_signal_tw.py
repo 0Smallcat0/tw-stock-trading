@@ -1,8 +1,9 @@
 """Forward-only shadow tracks for the non-crypto sleeves of the combination.
 
-Computes the mid-channel Donchian 10/20/55/110 signal — the same untuned
-rule the crypto program runs — on local candle series and appends one row
-per newly closed session to an append-only JSONL per sleeve.
+Computes the mid-channel Donchian 10/20/55/110 signal — the same rule the
+crypto program runs, selected there and applied here unchanged — on local
+candle series and appends one row per newly closed session to an
+append-only JSONL per sleeve.
 
 Boundaries:
 - Reads local candle files only. It never fetches, so a stale file is a
