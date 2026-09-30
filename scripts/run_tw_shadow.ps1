@@ -56,6 +56,6 @@ if ($LASTEXITCODE -ne 0) {
 # isolated build environment); `--no-build-isolation` resolved and installed
 # immediately, so that is the form recorded above. `pyarrow` is declared in
 # pyproject and its 28 MB wheel stalls on this link in three separate attempts -
-# it is imported by nothing in `src/` or `scripts/` (grep returns zero hits) and
-# is not on the recorder path, so it may be skipped when repairing under time
-# pressure.
+# it is imported by nothing (grep over `src/` and `scripts/` returns zero hits
+# apart from this comment, which is itself the only match) and is not on the
+# recorder path, so it may be skipped when repairing under time pressure.
