@@ -7,10 +7,15 @@
 
 A research program that asked one question with real money consequences:
 **can a retail, long-only, public-data strategy beat buying and holding 0050
-(Taiwan Top 50 ETF)?** It answered the question three pre-registered ways —
-trend-timing, leveraged ETFs, and a low-volatility factor — on 21+ years of
-total-return data, and had the discipline to report what the evidence said:
-**three FAILs. The honest answer is buy-and-hold.**
+(Taiwan Top 50 ETF)?** It tried four pre-registered routes on 21+ years of
+total-return data — trend-timing, leveraged ETFs, a low-volatility factor, and
+the crypto program's best candidate run unchanged. **None passed. For this
+question the answer is buy-and-hold.**
+
+**Status: the research program closed on 2026-10-16**, together with the
+[crypto program](https://github.com/0Smallcat0/crypto-quant-signal/blob/main/docs/research/CLOSING_2026-10-16.md).
+Nothing here is a signal to follow. The code, the verdicts and the sealed
+holdout stay up as a reference.
 
 The deliverables are the full backtesting system (data pipeline → strategy →
 risk → paper execution → accounting), the anti-overfitting validation gate
@@ -49,7 +54,7 @@ Full adjudication: [`docs/reports/TW_QUALIFICATION_VERDICT.md`](docs/reports/TW_
        src="docs/assets/trial4_exposure_light.png">
 </picture>
 
-## Four pre-registered experiments, four honest verdicts
+## Four pre-registered experiments, four verdicts
 
 | Route | Pre-registered claim | Verdict | Decisive evidence |
 | --- | --- | --- | --- |
@@ -81,7 +86,7 @@ forbidden by pre-registration.
 
 Reports: [`TW2_LEVERAGE_VERDICT.md`](docs/reports/TW2_LEVERAGE_VERDICT.md) ·
 [`TW4_LOWVOL_VERDICT.md`](docs/reports/TW4_LOWVOL_VERDICT.md) ·
-independent adversarial audit [`TW_VERDICT_AUDIT_2026-07-04.md`](docs/reports/TW_VERDICT_AUDIT_2026-07-04.md)
+adversarial audit by separate AI agents [`TW_VERDICT_AUDIT_2026-07-04.md`](docs/reports/TW_VERDICT_AUDIT_2026-07-04.md)
 (research reports are written in Traditional Chinese).
 
 ## Research methodology — why a FAIL is a result, not an accident
@@ -102,13 +107,15 @@ negotiate its way past it:
 - **Overfitting statistics.** CSCV/PBO (probability of backtest overfitting)
   and Deflated Sharpe Ratio gate the factor experiment; PBO correctly caught
   the only "winning" parameter cells as unstable.
-- **Adversarial audit.** The primary verdict was independently re-derived
-  (full replay, cost counterfactual scan, benchmark anchored externally at
-  0.0pp deviation) and the audit's disclosures are published alongside it.
+- **Adversarial audit.** Separate AI agents, working read-only, were asked to
+  overturn the primary verdict and could not: a full replay reproduced it, a
+  cost counterfactual scan found no cost world that passes, and the benchmark
+  rebuilt from outside sources deviated 0.0pp. Their findings are published
+  alongside it.
 - **Lookahead discipline.** Dual price series (signals read dividend/split-
   adjusted data; accounting reads raw), 200-close warmup, decisions execute
   next trading day — enforced by golden tests, not convention.
-- **Survivorship honesty.** The factor universe's survivorship mitigation is
+- **Survivorship bias, disclosed.** The factor universe's survivorship mitigation is
   disclosed with direction-of-bias reasoning: the bias only flatters returns,
   so the return FAIL is *a fortiori* robust.
 
@@ -125,11 +132,11 @@ flowchart LR
     api[api — read-only dashboard] -.reads.-> accounting
 ```
 
-- **Boundaries are compiler-enforced, not aspirational.** 15 import-linter
-  contracts keep layers honest (strategy cannot size or trade, risk sees only
-  supplied facts, execution is paper-only, API is read-only) — checked in CI
-  together with `mypy --strict` (62 modules) and ruff.
-- **371 offline tests** run in ~5 s; network-dependent tests are marked and
+- **Layer boundaries are checked in CI.** 15 import-linter contracts
+  (strategy cannot size or trade, risk sees only supplied facts, execution is
+  paper-only, API is read-only) run together with `mypy --strict` (64
+  modules) and ruff.
+- **383 offline tests** run in ~4 s; network-dependent tests are marked and
   excluded from CI.
 - **Taiwan market realism.** Corporate-action adjustment factors built from
   official rows; ROC-era date parsing (three boundary formats); an exchange
@@ -138,7 +145,7 @@ flowchart LR
   sell-side tax.
 - **Safe by construction.** Keyless public data only (TWSE / FinMind
   anonymous). No broker API, no credentials, no real orders — permanently, by
-  product definition. A 100,000 TWD virtual account is the honest scoreboard.
+  product definition. A 100,000 TWD virtual account is the scoreboard.
 - Architecture is shared with the crypto sibling project this was forked from;
   the market semantics (calendar, costs, corporate actions, dual series) are
   Taiwan's. System map: [`tw_quant_architecture.md`](tw_quant_architecture.md).
@@ -152,7 +159,7 @@ flowchart LR
 | `docs/research/` | Pre-registrations and design research, including the [multi-engine allocation research](docs/research/MULTI_ENGINE_FRAMEWORK_RESEARCH.md) |
 | `docs/reports/` | Verdicts, adversarial audit, trial registry, per-trial return series |
 | `scripts/` | Backfill, ingestion, registered backtest CLIs, chart generation |
-| `tests/` | 371 offline tests mirroring the `src/` layout |
+| `tests/` | 383 offline tests mirroring the `src/` layout |
 
 ## Reproduce
 
@@ -183,19 +190,28 @@ headline numbers:
 .\.venv\Scripts\python.exe scripts\make_readme_charts.py
 ```
 
-Re-running backtests end-to-end needs the local TimescaleDB
-(`docker compose up -d`, port 54321, dummy dev credentials in
-`docker-compose.yml`) and the backfill scripts in `scripts/`.
+Re-running the primary backtest needs only public data: no account, no key,
+no database. The first command downloads 0050's history from FinMind and TWSE
+(about ten minutes, most of it waiting out TWSE's rate limit). The second
+replays the primary rule and registers the run as a new trial in
+`trial_registry.jsonl`:
 
-## What's next
+```powershell
+.\.venv\Scripts\python.exe -m scripts.ingest_public_ohlcv
+.\.venv\Scripts\python.exe -m scripts.run_backtest
+```
 
-The single-engine question is closed. The researched follow-up is a
-**multi-engine cross-market allocator** (low-correlation return engines under
-shrinkage risk parity + fractional Kelly):
+A rerun from a fresh clone on 2026-10-22 ended at 275,874 TWD with a 26.32%
+drawdown, against trial #4's 276,230 and 26.32%; the benchmark matched to the
+TWD (787,034).
+
+## If the program restarts
+
+A **multi-engine cross-market allocator** (low-correlation return engines
+under shrinkage risk parity + fractional Kelly) was researched but not built:
 [`docs/research/MULTI_ENGINE_FRAMEWORK_RESEARCH.md`](docs/research/MULTI_ENGINE_FRAMEWORK_RESEARCH.md).
-Empirical groundwork is done (TW↔crypto monthly correlation 0.13–0.20 on local
-data); implementation would enter as a new pre-registered experiment against
-the still-sealed holdout.
+It would enter as a new pre-registered experiment against the still-sealed
+holdout.
 
 ## License
 

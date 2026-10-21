@@ -13,15 +13,10 @@ dependencies = [
     "pydantic",
     "PyYAML",
     "httpx",
-    "SQLAlchemy",
-    "alembic",
-    "psycopg",
-    "pandas",
-    "numpy",
-    "pyarrow",
     "fastapi",
-    "jinja2",
     "uvicorn",
+    # src/data/usetf.py reads America/New_York; Windows has no IANA database.
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

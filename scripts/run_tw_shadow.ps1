@@ -66,11 +66,7 @@ $recorderExit = $LASTEXITCODE
 # Repair-command note, measured 2026-09-30: plain `pip install -e .[dev]` made
 # zero progress in two separate ~9-minute runs here (it hangs creating the
 # isolated build environment); `--no-build-isolation` resolved and installed
-# immediately, so that is the form recorded above. `pyarrow` is declared in
-# pyproject and its 28 MB wheel stalls on this link in three separate attempts -
-# it is imported by nothing (grep over `src/` and `scripts/` returns zero hits
-# apart from this comment, which is itself the only match) and is not on the
-# recorder path, so it may be skipped when repairing under time pressure.
+# immediately, so that is the form recorded above.
 
 # Exit-code propagation, added 2026-10-01 (iteration 72), and the ingest codes
 # are propagated for a measured reason rather than for symmetry.
